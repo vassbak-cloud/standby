@@ -124,7 +124,8 @@ class Dashboard(
         buildPages()
         view.addView(homeLayer, FrameLayout.LayoutParams(-1, -1))
         view.addView(detailLayer, FrameLayout.LayoutParams(-1, -1))
-        detailLayer.visibility = View.GONE
+        // INVISIBLE (όχι GONE): μετριέται από την αρχή, ώστε το πρώτο άνοιγμα να έχει σωστό μέγεθος
+        detailLayer.visibility = View.INVISIBLE
 
         // Διπλό πάτημα στο κενό της αρχικής → έξοδος
         val gd = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
@@ -266,7 +267,7 @@ class Dashboard(
         openSection = sec
         animating = true
         if (sec == Section.COROS) loadCoros()   // φρέσκο πρόγραμμα κάθε φορά που ανοίγει
-        pages.values.forEach { it.visibility = View.GONE }
+        pages.values.forEach { it.visibility = View.INVISIBLE }
         page.visibility = View.VISIBLE
         detailLayer.visibility = View.VISIBLE
 
@@ -298,8 +299,8 @@ class Dashboard(
             .setDuration(340).setInterpolator(DecelerateInterpolator(1.6f))
             .setListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) {
-                    page.visibility = View.GONE
-                    detailLayer.visibility = View.GONE
+                    page.visibility = View.INVISIBLE
+                    detailLayer.visibility = View.INVISIBLE
                     openSection = null
                     animating = false
                 }
@@ -315,8 +316,8 @@ class Dashboard(
     private fun tileGeometry(t: View): Geo {
         val a = IntArray(2); val b = IntArray(2)
         t.getLocationInWindow(a); detailLayer.getLocationInWindow(b)
-        val w = detailLayer.width.coerceAtLeast(1).toFloat()
-        val h = detailLayer.height.coerceAtLeast(1).toFloat()
+        val w = (if (detailLayer.width > 0) detailLayer.width else view.width).coerceAtLeast(1).toFloat()
+        val h = (if (detailLayer.height > 0) detailLayer.height else view.height).coerceAtLeast(1).toFloat()
         // Η αρχική μπορεί να είναι σε σμίκρυνση· διορθώνουμε με την τρέχουσα κλίμακά της
         val s = homeLayer.scaleX
         return Geo((a[0] - b[0]).toFloat(), (a[1] - b[1]).toFloat(), t.width * s / w, t.height * s / h)
@@ -446,7 +447,7 @@ class Dashboard(
     private fun addPage(sec: Section, color: Int, title: String) {
         val page = FrameLayout(ctx).apply {
             setPadding(dp(18), dp(14), dp(18), dp(14))
-            visibility = View.GONE
+            visibility = View.INVISIBLE
             isClickable = true
             setOnClickListener { close() }
         }
