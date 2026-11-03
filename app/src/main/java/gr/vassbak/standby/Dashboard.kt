@@ -116,7 +116,7 @@ class Dashboard(
 
     private var weatherReady = false
     private var charging = true
-    private lateinit var aodPill: TextView
+    private lateinit var aodPill: View
     private var lastMinute = -1
     private var night: Boolean? = null
     private var lastTouch = System.currentTimeMillis()
@@ -236,9 +236,8 @@ class Dashboard(
 
         homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
 
-        // Κουμπί Always On (φαίνεται μόνο εκτός φόρτισης)
-        aodPill = tv("", 13f, white).apply {
-            setPadding(dp(14), dp(7), dp(14), dp(7))
+        // Κουμπάκι Always On (φαίνεται μόνο εκτός φόρτισης): πράσινο = δεν κλείνει, γκρι = κλείνει σε 1′
+        aodPill = View(ctx).apply {
             isClickable = true
             visibility = View.GONE
             setOnClickListener {
@@ -249,7 +248,7 @@ class Dashboard(
             }
         }
         styleAod()
-        homeLayer.addView(aodPill, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
+        homeLayer.addView(aodPill, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.BOTTOM or Gravity.START).apply {
             leftMargin = dp(34); bottomMargin = dp(14)
         })
     }
@@ -299,11 +298,11 @@ class Dashboard(
 
     private fun styleAod() {
         val on = Prefs.alwaysOn(ctx)
-        aodPill.text = if (on) "◉  Always On" else "◯  Always On · κλείνει σε 1′"
-        aodPill.setTextColor(if (on) Color.BLACK else grey)
+        aodPill.contentDescription = if (on) "Always On: ενεργό" else "Always On: ανενεργό"
         aodPill.background = GradientDrawable().apply {
-            cornerRadius = dp(16).toFloat()
-            if (on) setColor(amber) else { setColor(Color.parseColor("#1AFFFFFF")); setStroke(dp(1), Color.parseColor("#44FFFFFF")) }
+            shape = GradientDrawable.OVAL
+            setColor(if (on) cNav else Color.parseColor("#5A5A5A"))
+            setStroke(dp(2), if (on) Color.parseColor("#6634C759") else Color.parseColor("#33FFFFFF"))
         }
     }
 
