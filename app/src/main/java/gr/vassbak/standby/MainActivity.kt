@@ -147,8 +147,10 @@ class MainActivity : Activity() {
             Thread {
                 val err = Coros.login(this)
                 val msg = if (err == null) {
-                    val n = try { Coros.schedule(this, 7).size } catch (_: Exception) { -1 }
-                    "✅ Συνδέθηκε. Προπονήσεις 7 ημερών: ${if (n >= 0) n else "?"}"
+                    val list = try { Coros.schedule(this, 7) } catch (_: Exception) { null }
+                    if (list == null) "✅ Συνδέθηκε, αλλά το πρόγραμμα δεν διαβάστηκε"
+                    else "✅ Συνδέθηκε. Προπονήσεις 7 ημερών: ${list.size}" +
+                        list.joinToString("") { "\n• ${it.day.takeLast(2)}/${it.day.drop(4).take(2)} ${it.name}" }
                 } else "❌ $err"
                 runOnUiThread { corosStatus.text = msg; Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() }
             }.start()

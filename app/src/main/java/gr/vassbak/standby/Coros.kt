@@ -83,15 +83,39 @@ object Coros {
             if (json.optString("result") != "0000") throw Exception(json.optString("message", "Σφάλμα COROS"))
         }
         val list = mutableListOf<Workout>()
-        val entities = json.optJSONObject("data")?.optJSONArray("entities") ?: return list
+        val data = json.optJSONObject("data") ?: return list
+        val entities = data.optJSONArray("entities") ?: return list
+
+        // Το όνομα/άθλημα/διάρκεια βρίσκονται στα «programs», που συνδέονται με idInPlan ή planProgramId
+        val programs = data.optJSONArray("programs")
+        val byIdInPlan = mutableMapOf<String, JSONObject>()
+        val byId = mutableMapOf<String, JSONObject>()
+        if (programs != null) for (i in 0 until programs.length()) {
+            val p = programs.optJSONObject(i) ?: continue
+            p.opt("idInPlan")?.toString()?.let { if (it.isNotEmpty() && it != "null") byIdInPlan[it] = p }
+            p.opt("id")?.toString()?.let { if (it.isNotEmpty() && it != "null") byId[it] = p }
+        }
+
         for (i in 0 until entities.length()) {
             val e = entities.getJSONObject(i)
+            val idInPlan = e.opt("idInPlan")?.toString() ?: ""
+            val planProgramId = e.opt("planProgramId")?.toString() ?: ""
+            val prog = byIdInPlan[idInPlan] ?: byId[planProgramId]
+                ?: (if (programs != null && programs.length() == entities.length()) programs.optJSONObject(i) else null)
+
+            val name = prog?.optString("name", "")?.takeIf { it.isNotBlank() }
+                ?: e.optString("name", "").takeIf { it.isNotBlank() }
+                ?: "Ξεκούραση"
+            val sport = prog?.optInt("sportType", 0)?.takeIf { it != 0 } ?: e.optInt("sportType", 0)
+            val seconds = prog?.optDouble("estimatedTime", 0.0)?.takeIf { it > 0 } ?: e.optDouble("estimatedTime", 0.0)
+            val completed = e.optBoolean("completed", false)
+
             list += Workout(
                 day = e.opt("happenDay")?.toString() ?: "",
-                name = e.optString("name", "").ifBlank { "Ξεκούραση" },
-                sport = e.optInt("sportType", 0),
-                minutes = (e.optDouble("estimatedTime", 0.0) / 60).toInt(),
-                completed = e.optBoolean("completed", false)
+                name = name,
+                sport = sport,
+                minutes = (seconds / 60).toInt(),
+                completed = completed
             )
         }
         return list.sortedBy { it.day }
@@ -129,7 +153,9 @@ object Coros {
     }
 
     fun sportLabel(code: Int): Pair<String, String> = when (code) {
-        100 -> "🏃" to "Τρέξιμο"
+        1, 100 -> "🏃" to "Τρέξιμο"
+        2 -> "🚴" to "Ποδήλατο εσωτερικού"
+        4 -> "🏋️" to "Ενδυνάμωση"
         101 -> "🏃" to "Διάδρομος"
         102 -> "⛰️" to "Ορεινό τρέξιμο"
         103 -> "🏟️" to "Στίβος"

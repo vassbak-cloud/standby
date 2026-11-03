@@ -149,7 +149,7 @@ class Dashboard(
         override fun run() { loadWeather(); handler.postDelayed(this, 15 * 60_000L) }
     }
     private val corosLoop = object : Runnable {
-        override fun run() { loadCoros(); handler.postDelayed(this, 30 * 60_000L) }
+        override fun run() { loadCoros(); handler.postDelayed(this, 10 * 60_000L) }
     }
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) = showBattery(i)
@@ -265,6 +265,7 @@ class Dashboard(
         val page = pages[sec] ?: return
         openSection = sec
         animating = true
+        if (sec == Section.COROS) loadCoros()   // φρέσκο πρόγραμμα κάθε φορά που ανοίγει
         pages.values.forEach { it.visibility = View.GONE }
         page.visibility = View.VISIBLE
         detailLayer.visibility = View.VISIBLE
