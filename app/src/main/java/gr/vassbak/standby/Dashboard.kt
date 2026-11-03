@@ -58,7 +58,7 @@ class Dashboard(
     private val onExit: () -> Unit = {},
     private val onNightChanged: (Boolean) -> Unit = {}
 ) {
-    private enum class Section { NAV, WEATHER, BATTERY, COROS, CAL, NOTIF }
+    private enum class Section { NAV, WEATHER, BATTERY, COROS, MUSIC, CAL, NOTIF }
 
     val view: FrameLayout = object : FrameLayout(ctx) {
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -83,6 +83,7 @@ class Dashboard(
     private val cCal = Color.parseColor("#BF5AF2")
     private val cNotif = Color.parseColor("#FF375F")
     private val cNav = Color.parseColor("#34C759")
+    private val cMusic = Color.parseColor("#7D7AFF")
 
     private val white = Color.WHITE
     private val soft = Color.parseColor("#DDDDDD")
@@ -133,6 +134,7 @@ class Dashboard(
         homeLayer.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
 
         setBody(tileBodies.getValue(Section.WEATHER), tv("…", 24f, white, light = true))
+        tiles.getValue(Section.MUSIC).visibility = View.GONE
     }
 
     // ---------- Κύκλος ζωής ----------
@@ -162,6 +164,7 @@ class Dashboard(
         handler.post(corosLoop)
         loadEvents()
         loadNotifications()
+        startMusic()
     }
 
     fun stop() {
@@ -169,6 +172,7 @@ class Dashboard(
         State.showing = false
         handler.removeCallbacksAndMessages(null)
         NotifListener.onChange = null
+        stopMusic()
         try { ctx.unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
     }
 
@@ -197,8 +201,8 @@ class Dashboard(
         // Δεξιά: πλέγμα πλακιδίων
         val right = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         right.addView(tileRow(Section.WEATHER to 1.4f, Section.BATTERY to 1f), LinearLayout.LayoutParams(-1, 0, 1f))
-        right.addView(tile(Section.COROS, cCoros, "COROS ΣΗΜΕΡΑ"),
-            LinearLayout.LayoutParams(-1, 0, 0.9f).apply { topMargin = dp(8) })
+        right.addView(tileRow(Section.COROS to 1f, Section.MUSIC to 1.15f),
+            LinearLayout.LayoutParams(-1, 0, 0.95f).apply { topMargin = dp(8) })
         right.addView(tileRow(Section.CAL to 1.4f, Section.NOTIF to 1f),
             LinearLayout.LayoutParams(-1, 0, 1.25f).apply { topMargin = dp(8) })
         root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
@@ -214,6 +218,8 @@ class Dashboard(
                 Section.BATTERY -> cBattery to "ΜΠΑΤΑΡΙΑ"
                 Section.CAL -> cCal to "ΕΠΟΜΕΝΑ"
                 Section.NOTIF -> cNotif to "ΕΙΔΟΠΟΙΗΣΕΙΣ"
+                Section.COROS -> cCoros to "COROS ΣΗΜΕΡΑ"
+                Section.MUSIC -> cMusic to "ΜΟΥΣΙΚΗ"
                 else -> grey to ""
             }
             row.addView(tile(sec, color, title), LinearLayout.LayoutParams(0, -1, w).apply {
@@ -324,6 +330,8 @@ class Dashboard(
         addPage(Section.COROS, cCoros, "COROS · ΠΡΟΓΡΑΜΜΑ")
         addPage(Section.CAL, cCal, "ΗΜΕΡΟΛΟΓΙΟ · 7 ΗΜΕΡΕΣ")
         addPage(Section.NOTIF, cNotif, "ΕΙΔΟΠΟΙΗΣΕΙΣ")
+        addPage(Section.MUSIC, cMusic, "ΜΟΥΣΙΚΗ")
+        buildMusicPage()
 
         // Πλοήγηση σε όλη την οθόνη
         val nb = bodies.getValue(Section.NAV)
@@ -474,6 +482,7 @@ class Dashboard(
         val t = timeFmt.format(now)
         clock.text = t
         for (c in smallClocks) c.text = t
+        if (openSection == Section.MUSIC) refreshMusicProgress()
 
         // Επιστροφή στην αρχική μετά από 90" (εκτός από την πλοήγηση)
         if (openSection != null && openSection != Section.NAV &&
@@ -923,6 +932,166 @@ class Dashboard(
             }
             body.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
         }
+    }
+
+    // ---------- Μουσική ----------
+
+    private var musicCtl: android.media.session.MediaController? = null
+    private lateinit var mArt: ImageView
+    private lateinit var mApp: TextView
+    private lateinit var mTitle: TextView
+    private lateinit var mArtist: TextView
+    private lateinit var mPlay: TextView
+    private lateinit var mFill: View
+    private lateinit var mTrack: FrameLayout
+    private lateinit var mPos: TextView
+    private lateinit var mDur: TextView
+
+    private val musicCallback = object : android.media.session.MediaController.Callback() {
+        override fun onMetadataChanged(metadata: android.media.MediaMetadata?) { handler.post { renderMusic() } }
+        override fun onPlaybackStateChanged(state: android.media.session.PlaybackState?) { handler.post { renderMusic() } }
+        override fun onSessionDestroyed() { handler.post { bindMusic() } }
+    }
+    private val sessionsListener = android.media.session.MediaSessionManager.OnActiveSessionsChangedListener {
+        handler.post { bindMusic() }
+    }
+
+    private fun startMusic() {
+        try {
+            Music.manager(ctx).addOnActiveSessionsChangedListener(sessionsListener, Music.listenerComponent(ctx), handler)
+        } catch (_: Exception) {}
+        bindMusic()
+    }
+
+    private fun stopMusic() {
+        try { Music.manager(ctx).removeOnActiveSessionsChangedListener(sessionsListener) } catch (_: Exception) {}
+        musicCtl?.unregisterCallback(musicCallback)
+        musicCtl = null
+    }
+
+    private fun bindMusic() {
+        val c = Music.controller(ctx)
+        if (c?.sessionToken != musicCtl?.sessionToken) {
+            musicCtl?.unregisterCallback(musicCallback)
+            musicCtl = c
+            c?.registerCallback(musicCallback, handler)
+        }
+        renderMusic()
+    }
+
+    private fun circleBtn(label: String, size: Int, filled: Boolean, onTap: () -> Unit) = tv(label, if (size > 60) 30f else 22f, white).apply {
+        gravity = Gravity.CENTER
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(if (filled) withAlpha(cMusic, 0xCC) else withAlpha(cMusic, 0x30))
+        }
+        isClickable = true
+        setOnClickListener { onTap() }
+        setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.85f).scaleY(0.85f).setDuration(90).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> springBack(v)
+            }
+            false
+        }
+        layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
+    }
+
+    private fun buildMusicPage() {
+        val body = bodies.getValue(Section.MUSIC)
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        mArt = ImageView(ctx).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(withAlpha(cMusic, 0x40)) }
+            clipToOutline = true
+        }
+        row.addView(mArt, LinearLayout.LayoutParams(dp(210), dp(210)).apply { marginEnd = dp(28) })
+
+        val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        mApp = tv("", 13f, cMusic)
+        mTitle = tv("", 30f, white, light = true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+        mArtist = tv("", 19f, grey).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        col.addView(mApp); col.addView(mTitle); col.addView(mArtist)
+
+        // Μπάρα προόδου
+        mTrack = FrameLayout(ctx).apply {
+            background = GradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(Color.parseColor("#33FFFFFF")) }
+        }
+        mFill = View(ctx).apply {
+            background = GradientDrawable().apply { cornerRadius = dp(3).toFloat(); setColor(white) }
+        }
+        mTrack.addView(mFill, FrameLayout.LayoutParams(0, -1))
+        col.addView(mTrack, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(18) })
+        val times = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        mPos = tv("0:00", 12f, grey); mDur = tv("0:00", 12f, grey)
+        times.addView(mPos, LinearLayout.LayoutParams(0, -2, 1f)); times.addView(mDur)
+        col.addView(times)
+
+        // Κουμπιά
+        val ctl = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        ctl.addView(circleBtn("⏮", 56, false) { musicCtl?.transportControls?.skipToPrevious() })
+        mPlay = circleBtn("▶", 72, true) { Music.toggle(musicCtl) }
+        ctl.addView(mPlay)
+        (mPlay.layoutParams as LinearLayout.LayoutParams).apply { marginStart = dp(22); marginEnd = dp(22) }
+        ctl.addView(circleBtn("⏭", 56, false) { musicCtl?.transportControls?.skipToNext() })
+        col.addView(ctl, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(14); gravity = Gravity.CENTER_HORIZONTAL })
+
+        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        body.gravity = Gravity.CENTER_VERTICAL
+        body.addView(row)
+    }
+
+    private fun renderMusic() {
+        val tileView = tiles.getValue(Section.MUSIC)
+        val c = musicCtl
+        val t = if (c != null) Music.track(ctx, c) else null
+        if (t == null) {
+            if (tileView.visibility == View.VISIBLE) tileView.visibility = View.GONE
+            if (openSection == Section.MUSIC) close()
+            return
+        }
+        if (tileView.visibility != View.VISIBLE) {
+            tileView.visibility = View.VISIBLE
+            tileView.scaleX = 0.7f; tileView.scaleY = 0.7f; tileView.alpha = 0f
+            tileView.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(650).setInterpolator(SpringInterpolator()).start()
+        }
+
+        // Πλακίδιο
+        val line = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        if (t.art != null) line.addView(ImageView(ctx).apply {
+            setImageBitmap(t.art)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(Color.DKGRAY) }
+            clipToOutline = true
+        }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(10) })
+        val txt = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        txt.addView(tv(t.title, 15f, white).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        txt.addView(tv(t.artist, 12f, grey).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        line.addView(txt, LinearLayout.LayoutParams(0, -2, 1f))
+        line.addView(circleBtn(if (t.playing) "⏸" else "▶", 38, true) { Music.toggle(musicCtl) }.apply {
+            textSize = 16f
+            (layoutParams as LinearLayout.LayoutParams).marginStart = dp(8)
+        })
+        setBody(tileBodies.getValue(Section.MUSIC), line)
+
+        // Πλήρης οθόνη
+        if (t.art != null) mArt.setImageBitmap(t.art) else mArt.setImageDrawable(null)
+        mApp.text = t.app.uppercase(el)
+        mTitle.text = t.title
+        mArtist.text = t.artist
+        mPlay.text = if (t.playing) "⏸" else "▶"
+        refreshMusicProgress()
+    }
+
+    private fun refreshMusicProgress() {
+        val c = musicCtl ?: return
+        val t = Music.track(ctx, c) ?: return
+        mPos.text = Music.fmt(t.position)
+        mDur.text = Music.fmt(t.duration)
+        val frac = if (t.duration > 0) (t.position.toFloat() / t.duration).coerceIn(0f, 1f) else 0f
+        val w = (mTrack.width * frac).toInt()
+        mFill.layoutParams = (mFill.layoutParams as FrameLayout.LayoutParams).apply { width = w }
+        mFill.requestLayout()
     }
 
     // ---------- Βοηθητικά ----------
