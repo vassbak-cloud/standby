@@ -156,8 +156,30 @@ class Dashboard(
         override fun onReceive(c: Context, i: Intent) = showBattery(i)
     }
 
+    // Αισθητήρας εγγύτητας: σβήνει την οθόνη στην τσέπη και την ανάβει όταν βγει
+    private var pocketLock: android.os.PowerManager.WakeLock? = null
+
+    private fun startPocket() {
+        if (!Prefs.pocket(ctx) || pocketLock != null) return
+        try {
+            val pm = ctx.getSystemService(android.os.PowerManager::class.java)
+            if (pm.isWakeLockLevelSupported(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+                pocketLock = pm.newWakeLock(android.os.PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "standby:pocket").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun stopPocket() {
+        try { pocketLock?.release() } catch (_: Exception) {}
+        pocketLock = null
+    }
+
     fun start() {
         State.showing = true
+        startPocket()
         ctx.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { showBattery(it) }
         NotifListener.onChange = { handler.post { loadNotifications() } }
         handler.post(tick)
@@ -174,6 +196,7 @@ class Dashboard(
         handler.removeCallbacksAndMessages(null)
         NotifListener.onChange = null
         stopMusic()
+        stopPocket()
         try { ctx.unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
     }
 

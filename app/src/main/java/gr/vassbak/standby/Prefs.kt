@@ -27,6 +27,8 @@ object Prefs {
     fun rotation(ctx: Context) = get(ctx).getInt(KEY_ROTATION, 90)
     const val KEY_WAKE_CHARGING = "wake_charging"
     fun wakeOnCharging(ctx: Context) = get(ctx).getBoolean(KEY_WAKE_CHARGING, false)
+    const val KEY_POCKET = "pocket"
+    fun pocket(ctx: Context) = get(ctx).getBoolean(KEY_POCKET, true)
     fun autoMode(ctx: Context) = get(ctx).getInt(KEY_AUTO, AUTO_OFF)
     fun nightMode(ctx: Context) = get(ctx).getBoolean(KEY_NIGHT, true)
 }
