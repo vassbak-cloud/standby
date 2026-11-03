@@ -9,14 +9,18 @@ import android.view.ViewGroup
  * «πάντα οριζόντια», περιστρέφει το περιεχόμενο κατά [angle] μοίρες, ώστε να
  * φαίνεται οριζόντιο ακόμα κι όταν η αυτόματη περιστροφή είναι κλειστή.
  */
-class RotatedLayout(context: Context, private val angle: Int) : ViewGroup(context) {
+class RotatedLayout(context: Context, setting: Int) : ViewGroup(context) {
+
+    // Κάθετη: περιστρέφει μόνο αν η οθόνη είναι πλαγιαστή, ώστε να φαίνεται όρθιο
+    private val portrait = setting == Prefs.PORTRAIT
+    private val angle = if (portrait) 270 else setting
 
     private var rotate = false
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
         val h = MeasureSpec.getSize(heightMeasureSpec)
-        rotate = angle != 0 && h > w
+        rotate = if (portrait) w > h else angle != 0 && h > w
         val child = getChildAt(0)
         if (child != null) {
             val cw = if (rotate) h else w

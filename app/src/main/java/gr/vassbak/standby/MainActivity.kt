@@ -172,18 +172,19 @@ class MainActivity : Activity() {
         val options = listOf(
             90 to "Οριζόντια — φορτιστής δεξιά",
             270 to "Οριζόντια — φορτιστής αριστερά",
+            Prefs.PORTRAIT to "Κάθετη (όρθιο κινητό)",
             0 to "Ακολουθεί την περιστροφή του κινητού"
         )
         for ((value, label) in options) {
             group.addView(RadioButton(this).apply {
-                id = 1000 + value
+                id = 2000 + value
                 text = label
                 textSize = 16f
                 isChecked = Prefs.rotation(this@MainActivity) == value
             })
         }
         group.setOnCheckedChangeListener { _, id ->
-            prefs.edit().putInt(Prefs.KEY_ROTATION, id - 1000).apply()
+            prefs.edit().putInt(Prefs.KEY_ROTATION, id - 2000).apply()
         }
         col.addView(group)
 

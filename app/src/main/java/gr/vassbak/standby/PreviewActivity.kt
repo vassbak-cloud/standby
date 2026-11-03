@@ -1,6 +1,7 @@
 package gr.vassbak.standby
 
 import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.View
 import android.view.WindowInsets
@@ -19,6 +20,8 @@ class PreviewActivity : Activity() {
         super.onCreate(savedInstanceState)
         setShowWhenLocked(true)
         setTurnScreenOn(true)
+        requestedOrientation = if (Prefs.portrait(this)) ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                               else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         dashboard = Dashboard(this, onExit = { finish() }, onNightChanged = { night ->
             window.attributes = window.attributes.apply { screenBrightness = if (night) 0.05f else -1f }

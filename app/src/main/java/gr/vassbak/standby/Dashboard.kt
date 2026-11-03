@@ -19,8 +19,12 @@ import android.graphics.drawable.GradientDrawable
 import android.location.Location
 import android.location.LocationManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.CalendarContract
 import android.text.TextUtils
 import android.util.TypedValue
@@ -120,6 +124,7 @@ class Dashboard(
     private var lastMinute = -1
     private var night: Boolean? = null
     private var lastTouch = System.currentTimeMillis()
+    private val portrait = Prefs.portrait(ctx)
 
     init {
         buildHome()
@@ -206,15 +211,20 @@ class Dashboard(
     // ---------- Αρχική οθόνη με πλακίδια ----------
 
     private fun buildHome() {
+        // Οριζόντια: ρολόι αριστερά, πλακίδια δεξιά. Κάθετη: ρολόι πάνω, πλακίδια κάτω.
         val root = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(28), dp(16), dp(28), dp(16))
+            orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            if (portrait) setPadding(dp(16), dp(28), dp(16), dp(48))
+            else setPadding(dp(28), dp(16), dp(28), dp(16))
         }
 
         // Αριστερά: ρολόι, ή μεγάλο πλακίδιο πλοήγησης όσο τρέχει το Maps
         val left = FrameLayout(ctx)
-        val clockCol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
-        clock = tv("00:00", 108f, white, thin = true).apply { includeFontPadding = false }
+        val clockCol = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = if (portrait) Gravity.CENTER else Gravity.CENTER_VERTICAL
+        }
+        clock = tv("00:00", if (portrait) 96f else 108f, white, thin = true).apply { includeFontPadding = false }
         date = tv("", 21f, amber, light = true).apply { setPadding(dp(6), 0, 0, 0) }
         clockCol.addView(clock)
         clockCol.addView(date)
@@ -222,8 +232,10 @@ class Dashboard(
         left.addView(clockCol, FrameLayout.LayoutParams(-1, -1))
         val navTile = tile(Section.NAV, cNav, "ΠΛΟΗΓΗΣΗ")
         navTile.visibility = View.GONE
-        left.addView(navTile, FrameLayout.LayoutParams(-1, -1).apply { marginEnd = dp(10) })
-        root.addView(left, LinearLayout.LayoutParams(0, -1, 1.15f))
+        left.addView(navTile, FrameLayout.LayoutParams(-1, -1).apply {
+            if (portrait) bottomMargin = dp(10) else marginEnd = dp(10)
+        })
+        root.addView(left, if (portrait) LinearLayout.LayoutParams(-1, 0, 0.6f) else LinearLayout.LayoutParams(0, -1, 1.15f))
 
         // Δεξιά: πλέγμα πλακιδίων
         val right = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -232,7 +244,7 @@ class Dashboard(
             LinearLayout.LayoutParams(-1, 0, 0.95f).apply { topMargin = dp(8) })
         right.addView(tileRow(Section.CAL to 1.4f, Section.NOTIF to 1f),
             LinearLayout.LayoutParams(-1, 0, 1.25f).apply { topMargin = dp(8) })
-        root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
+        root.addView(right, if (portrait) LinearLayout.LayoutParams(-1, 0, 1.4f) else LinearLayout.LayoutParams(0, -1, 1f))
 
         homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
 
@@ -241,6 +253,7 @@ class Dashboard(
             isClickable = true
             visibility = View.GONE
             setOnClickListener {
+                buzz()
                 Prefs.get(ctx).edit().putBoolean(Prefs.KEY_AOD, !Prefs.alwaysOn(ctx)).apply()
                 styleAod()
                 scaleX = 0.85f; scaleY = 0.85f
@@ -287,7 +300,7 @@ class Dashboard(
                 MotionEvent.ACTION_UP -> {
                     springBack(v)
                     val inside = e.x >= 0 && e.y >= 0 && e.x <= v.width && e.y <= v.height
-                    if (inside) open(sec)
+                    if (inside) { buzz(); open(sec) }
                 }
                 MotionEvent.ACTION_CANCEL -> springBack(v)
             }
@@ -304,6 +317,22 @@ class Dashboard(
             setColor(if (on) cNav else Color.parseColor("#5A5A5A"))
             setStroke(dp(2), if (on) Color.parseColor("#6634C759") else Color.parseColor("#33FFFFFF"))
         }
+    }
+
+    /** Μικρή δόνηση στο πάτημα κουμπιού. */
+    private val vibrator: Vibrator? by lazy {
+        if (Build.VERSION.SDK_INT >= 31)
+            (ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+        else @Suppress("DEPRECATION") (ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
+    }
+
+    private fun buzz() {
+        val v = vibrator ?: return
+        if (!v.hasVibrator()) return
+        try {
+            if (Build.VERSION.SDK_INT >= 29) v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
+            else v.vibrate(VibrationEffect.createOneShot(20, VibrationEffect.DEFAULT_AMPLITUDE))
+        } catch (_: Exception) {}
     }
 
     private fun springBack(v: View) {
@@ -413,6 +442,7 @@ class Dashboard(
             isClickable = true
             isLongClickable = true
             setOnClickListener { v ->
+                buzz()
                 // απλό πάτημα: μικρό «κούνημα» για να θυμίσει ότι θέλει κράτημα
                 v.translationX = dp(10).toFloat()
                 v.animate().translationX(0f).setDuration(500).setInterpolator(SpringInterpolator(6f, 30f)).start()
@@ -469,7 +499,7 @@ class Dashboard(
                 setColor(if (filled) color else withAlpha(color, 0x30))
             }
             isClickable = true
-            setOnClickListener { onTap() }
+            setOnClickListener { buzz(); onTap() }
         }
         btns.addView(pill("Άκυρο", grey, false) { dismiss() })
         btns.addView(pill("Τερματισμός", red, true) {
@@ -1051,7 +1081,7 @@ class Dashboard(
             setColor(if (filled) withAlpha(cMusic, 0xCC) else withAlpha(cMusic, 0x30))
         }
         isClickable = true
-        setOnClickListener { onTap() }
+        setOnClickListener { buzz(); onTap() }
         setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.85f).scaleY(0.85f).setDuration(90).start()
@@ -1250,7 +1280,7 @@ class Dashboard(
                 setColor(if (filled) color else withAlpha(color, 0x30))
             }
             isClickable = true
-            setOnClickListener { onTap() }
+            setOnClickListener { buzz(); onTap() }
         }
         val btns = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
         btns.addView(pill("Διαγραφή", Color.parseColor("#FF453A"), false) {
@@ -1266,8 +1296,9 @@ class Dashboard(
         box.addView(btns, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         overlay.setOnClickListener { dismissPopup() }
-        val w = (view.width * 0.72f).toInt().coerceAtLeast(dp(320))
-        val h = (view.height * 0.86f).toInt()
+        val w = if (portrait) (view.width * 0.92f).toInt()
+                else (view.width * 0.72f).toInt().coerceAtLeast(dp(320)).coerceAtMost(view.width)
+        val h = (view.height * if (portrait) 0.7f else 0.86f).toInt()
         overlay.addView(box, FrameLayout.LayoutParams(w, h, Gravity.CENTER))
         view.addView(overlay, FrameLayout.LayoutParams(-1, -1))
 
