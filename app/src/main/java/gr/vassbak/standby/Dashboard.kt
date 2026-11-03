@@ -1,6 +1,9 @@
 package gr.vassbak.standby
 
 import android.Manifest
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.ContentUris
 import android.content.Context
@@ -21,8 +24,12 @@ import android.os.Looper
 import android.provider.CalendarContract
 import android.text.TextUtils
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.Interpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -32,20 +39,36 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.random.Random
 
+/** Ελατήριο τύπου iPhone: ξεπερνά λίγο τον στόχο και ταλαντώνεται μέχρι να ηρεμήσει. */
+class SpringInterpolator(private val damping: Float = 6.5f, private val freq: Float = 13f) : Interpolator {
+    override fun getInterpolation(t: Float): Float = (1 - exp(-damping * t) * cos(freq * t)).toFloat()
+}
+
 /**
- * Η οθόνη StandBy: σελίδες με κάθετο swipe
- * (Αρχική · COROS · Ημερολόγιο · Καιρός · Ειδοποιήσεις), κάθε κατηγορία σε δικό της χρωματιστό πλαίσιο.
+ * Η οθόνη StandBy: δυναμική αρχική με πλακίδια. Πατάς ένα πλακίδιο και ανοίγει σε όλη την οθόνη
+ * με ελατηριωτή κίνηση· πατάς ξανά και επιστρέφει. Διπλό πάτημα στο κενό της αρχικής = έξοδος.
  */
+@SuppressLint("ClickableViewAccessibility")
 class Dashboard(
     private val ctx: Context,
     private val onExit: () -> Unit = {},
     private val onNightChanged: (Boolean) -> Unit = {}
 ) {
-    val view = FrameLayout(ctx).apply { setBackgroundColor(Color.BLACK) }
-    private val pager = Pager(ctx)
-    private val dots = LinearLayout(ctx)
+    private enum class Section { NAV, WEATHER, BATTERY, COROS, CAL, NOTIF }
+
+    val view: FrameLayout = object : FrameLayout(ctx) {
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) lastTouch = System.currentTimeMillis()
+            return super.dispatchTouchEvent(ev)
+        }
+    }.apply { setBackgroundColor(Color.BLACK) }
+
+    private val homeLayer = FrameLayout(ctx)
+    private val detailLayer = FrameLayout(ctx)
 
     private val handler = Handler(Looper.getMainLooper())
     private val el = Locale("el", "GR")
@@ -67,54 +90,47 @@ class Dashboard(
     private val dim = Color.parseColor("#666666")
     private val amber = Color.parseColor("#FFB340")
 
-    // Αρχική σελίδα
+    // Αρχική
     private lateinit var clock: TextView
     private lateinit var date: TextView
-    private lateinit var homeWeather: LinearLayout
-    private lateinit var homeBattery: LinearLayout
-    private lateinit var homeCorosCard: View
-    private lateinit var homeCoros: LinearLayout
-    private lateinit var homeEventsCard: View
-    private lateinit var homeEvents: LinearLayout
     private lateinit var clockBlock: View
-    private lateinit var navBlock: View
-    private lateinit var navArrow: ImageView
-    private lateinit var navDistance: TextView
-    private lateinit var navInstruction: TextView
-    private lateinit var navEta: TextView
-    private lateinit var navClock: TextView
+    private val tiles = mutableMapOf<Section, LinearLayout>()      // το πλαίσιο
+    private val tileBodies = mutableMapOf<Section, LinearLayout>() // το περιεχόμενο
+
+    // Πλήρεις οθόνες
+    private val pages = mutableMapOf<Section, View>()
+    private val bodies = mutableMapOf<Section, LinearLayout>()
+    private val smallClocks = mutableListOf<TextView>()
+    private var openSection: Section? = null
+    private var animating = false
+
+    // Πλοήγηση
+    private lateinit var navArrowBig: ImageView
+    private lateinit var navDistBig: TextView
+    private lateinit var navInstrBig: TextView
+    private lateinit var navEtaBig: TextView
     private var navActive = false
 
-    // Σώματα των άλλων σελίδων
-    private val smallClocks = mutableListOf<TextView>()
-    private val corosBody: LinearLayout
-    private val calBody: LinearLayout
-    private val weatherBody: LinearLayout
-    private val notifBody: LinearLayout
-
-    private var weatherText = "…"
+    private var weatherReady = false
     private var lastMinute = -1
     private var night: Boolean? = null
     private var lastTouch = System.currentTimeMillis()
 
     init {
-        pager.addView(buildHome())
-        corosBody = addPage("COROS · ΠΡΟΓΡΑΜΜΑ")
-        calBody = addPage("ΗΜΕΡΟΛΟΓΙΟ · 7 ΗΜΕΡΕΣ")
-        weatherBody = addPage("ΚΑΙΡΟΣ")
-        notifBody = addPage("ΕΙΔΟΠΟΙΗΣΕΙΣ")
+        buildHome()
+        buildPages()
+        view.addView(homeLayer, FrameLayout.LayoutParams(-1, -1))
+        view.addView(detailLayer, FrameLayout.LayoutParams(-1, -1))
+        detailLayer.visibility = View.GONE
 
-        view.addView(pager, FrameLayout.LayoutParams(-1, -1))
-        dots.orientation = LinearLayout.VERTICAL
-        dots.gravity = Gravity.CENTER
-        view.addView(dots, FrameLayout.LayoutParams(-2, -1, Gravity.END).apply { marginEnd = dp(12) })
-        buildDots()
+        // Διπλό πάτημα στο κενό της αρχικής → έξοδος
+        val gd = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onDoubleTap(e: MotionEvent): Boolean { onExit(); return true }
+        })
+        homeLayer.setOnTouchListener { _, e -> gd.onTouchEvent(e) }
 
-        pager.onPageChanged = { updateDots(it) }
-        pager.onDoubleTap = { onExit() }
-        pager.onInteraction = { lastTouch = System.currentTimeMillis() }
-
-        setText(homeWeather, listOf(tv("…", 26f, white, light = true)))
+        setBody(tileBodies.getValue(Section.WEATHER), tv("…", 24f, white, light = true))
     }
 
     // ---------- Κύκλος ζωής ----------
@@ -154,70 +170,206 @@ class Dashboard(
         try { ctx.unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
     }
 
-    // ---------- Αρχική σελίδα ----------
+    // ---------- Αρχική οθόνη με πλακίδια ----------
 
-    private fun buildHome(): View {
+    private fun buildHome() {
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(32), dp(18), dp(40), dp(18))
+            setPadding(dp(28), dp(16), dp(28), dp(16))
         }
 
+        // Αριστερά: ρολόι, ή μεγάλο πλακίδιο πλοήγησης όσο τρέχει το Maps
         val left = FrameLayout(ctx)
         val clockCol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
-        clock = tv("00:00", 112f, white, thin = true).apply { includeFontPadding = false }
-        date = tv("", 22f, amber, light = true).apply { setPadding(dp(6), 0, 0, 0) }
+        clock = tv("00:00", 108f, white, thin = true).apply { includeFontPadding = false }
+        date = tv("", 21f, amber, light = true).apply { setPadding(dp(6), 0, 0, 0) }
         clockCol.addView(clock)
         clockCol.addView(date)
         clockBlock = clockCol
         left.addView(clockCol, FrameLayout.LayoutParams(-1, -1))
+        val navTile = tile(Section.NAV, cNav, "ΠΛΟΗΓΗΣΗ")
+        navTile.visibility = View.GONE
+        left.addView(navTile, FrameLayout.LayoutParams(-1, -1).apply { marginEnd = dp(10) })
+        root.addView(left, LinearLayout.LayoutParams(0, -1, 1.15f))
 
-        // Πλοήγηση Google Maps: εμφανίζεται στη θέση του ρολογιού όσο τρέχει
-        val (navCard, navBody) = card(cNav, "ΠΛΟΗΓΗΣΗ")
-        navClock = tv("", 16f, grey, light = true)
-        val navRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        navArrow = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        navRow.addView(navArrow, LinearLayout.LayoutParams(dp(110), dp(110)).apply { marginEnd = dp(14) })
-        val navText = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        navDistance = tv("", 46f, white, light = true).apply { maxLines = 1; includeFontPadding = false }
-        navInstruction = tv("", 21f, soft).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
-        navText.addView(navDistance)
-        navText.addView(navInstruction)
-        navRow.addView(navText, LinearLayout.LayoutParams(0, -2, 1f))
-        navBody.gravity = Gravity.CENTER_VERTICAL
-        navBody.addView(navRow)
-        navEta = tv("", 16f, cNav).apply { setPadding(0, dp(10), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
-        navBody.addView(navEta)
-        navCard.addView(navClock, 0)
-        navBlock = navCard
-        navCard.visibility = View.GONE
-        left.addView(navCard, FrameLayout.LayoutParams(-1, -1).apply { marginEnd = dp(10) })
-        smallClocks += navClock
-
-        root.addView(left, LinearLayout.LayoutParams(0, -1, 1.2f))
-
+        // Δεξιά: πλέγμα πλακιδίων
         val right = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-
-        val (wCard, wBody) = card(cWeather, "ΚΑΙΡΟΣ")
-        homeWeather = wBody
-        right.addView(wCard, lp(-1, -2))
-
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        val (bCard, bBody) = card(cBattery, "ΜΠΑΤΑΡΙΑ")
-        homeBattery = bBody
-        row.addView(bCard, LinearLayout.LayoutParams(0, -1, 1f))
-        val (cCard, cBody) = card(cCoros, "COROS ΣΗΜΕΡΑ")
-        homeCorosCard = cCard
-        homeCoros = cBody
-        row.addView(cCard, LinearLayout.LayoutParams(0, -1, 1.6f).apply { marginStart = dp(8) })
-        right.addView(row, lp(-1, -2).apply { topMargin = dp(8) })
-
-        val (eCard, eBody) = card(cCal, "ΕΠΟΜΕΝΑ")
-        homeEventsCard = eCard
-        homeEvents = eBody
-        right.addView(eCard, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
-
+        right.addView(tileRow(Section.WEATHER to 1.4f, Section.BATTERY to 1f), LinearLayout.LayoutParams(-1, 0, 1f))
+        right.addView(tile(Section.COROS, cCoros, "COROS ΣΗΜΕΡΑ"),
+            LinearLayout.LayoutParams(-1, 0, 0.9f).apply { topMargin = dp(8) })
+        right.addView(tileRow(Section.CAL to 1.4f, Section.NOTIF to 1f),
+            LinearLayout.LayoutParams(-1, 0, 1.25f).apply { topMargin = dp(8) })
         root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
-        return root
+
+        homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    private fun tileRow(vararg items: Pair<Section, Float>): LinearLayout {
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        items.forEachIndexed { i, (sec, w) ->
+            val (color, title) = when (sec) {
+                Section.WEATHER -> cWeather to "ΚΑΙΡΟΣ"
+                Section.BATTERY -> cBattery to "ΜΠΑΤΑΡΙΑ"
+                Section.CAL -> cCal to "ΕΠΟΜΕΝΑ"
+                Section.NOTIF -> cNotif to "ΕΙΔΟΠΟΙΗΣΕΙΣ"
+                else -> grey to ""
+            }
+            row.addView(tile(sec, color, title), LinearLayout.LayoutParams(0, -1, w).apply {
+                if (i > 0) marginStart = dp(8)
+            })
+        }
+        return row
+    }
+
+    /** Πλακίδιο: χρωματιστό πλαίσιο που «βουλιάζει» στο πάτημα και ανοίγει σε όλη την οθόνη. */
+    private fun tile(sec: Section, color: Int, title: String): LinearLayout {
+        val (outer, body) = card(color, title)
+        tiles[sec] = outer
+        tileBodies[sec] = body
+        outer.isClickable = true
+        outer.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(110)
+                        .setInterpolator(DecelerateInterpolator()).start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    springBack(v)
+                    val inside = e.x >= 0 && e.y >= 0 && e.x <= v.width && e.y <= v.height
+                    if (inside) open(sec)
+                }
+                MotionEvent.ACTION_CANCEL -> springBack(v)
+            }
+            true
+        }
+        return outer
+    }
+
+    private fun springBack(v: View) {
+        v.animate().scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(SpringInterpolator(7f, 16f)).start()
+    }
+
+    // ---------- Άνοιγμα / κλείσιμο με ελατήριο ----------
+
+    private fun open(sec: Section) {
+        if (animating || openSection != null) return
+        val tileView = tiles[sec] ?: return
+        val page = pages[sec] ?: return
+        openSection = sec
+        animating = true
+        pages.values.forEach { it.visibility = View.GONE }
+        page.visibility = View.VISIBLE
+        detailLayer.visibility = View.VISIBLE
+
+        val (tx, ty, sx, sy) = tileGeometry(tileView)
+        page.pivotX = 0f; page.pivotY = 0f
+        page.translationX = tx; page.translationY = ty
+        page.scaleX = sx; page.scaleY = sy
+        page.alpha = 0.4f
+
+        page.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).alpha(1f)
+            .setDuration(650).setInterpolator(SpringInterpolator())
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: Animator) { animating = false }
+            }).start()
+        homeLayer.animate().scaleX(0.9f).scaleY(0.9f).alpha(0f).setDuration(300)
+            .setInterpolator(DecelerateInterpolator()).setListener(null).start()
+    }
+
+    private fun close() {
+        val sec = openSection ?: return
+        if (animating) return
+        val tileView = tiles[sec] ?: return
+        val page = pages[sec] ?: return
+        animating = true
+        homeLayer.animate().cancel()
+        homeLayer.scaleX = 1f; homeLayer.scaleY = 1f
+        val (tx, ty, sx, sy) = tileGeometry(tileView)
+        page.animate().translationX(tx).translationY(ty).scaleX(sx).scaleY(sy).alpha(0f)
+            .setDuration(340).setInterpolator(DecelerateInterpolator(1.6f))
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(a: Animator) {
+                    page.visibility = View.GONE
+                    detailLayer.visibility = View.GONE
+                    openSection = null
+                    animating = false
+                }
+            }).start()
+        homeLayer.scaleX = 0.95f; homeLayer.scaleY = 0.95f
+        homeLayer.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(560)
+            .setInterpolator(SpringInterpolator(7f, 14f)).setListener(null).start()
+    }
+
+    private data class Geo(val tx: Float, val ty: Float, val sx: Float, val sy: Float)
+
+    /** Θέση και κλίμακα του πλακιδίου ως προς όλη την οθόνη. */
+    private fun tileGeometry(t: View): Geo {
+        val a = IntArray(2); val b = IntArray(2)
+        t.getLocationInWindow(a); detailLayer.getLocationInWindow(b)
+        val w = detailLayer.width.coerceAtLeast(1).toFloat()
+        val h = detailLayer.height.coerceAtLeast(1).toFloat()
+        // Η αρχική μπορεί να είναι σε σμίκρυνση· διορθώνουμε με την τρέχουσα κλίμακά της
+        val s = homeLayer.scaleX
+        return Geo((a[0] - b[0]).toFloat(), (a[1] - b[1]).toFloat(), t.width * s / w, t.height * s / h)
+    }
+
+    // ---------- Πλήρεις οθόνες ----------
+
+    private fun buildPages() {
+        addPage(Section.NAV, cNav, "ΠΛΟΗΓΗΣΗ")
+        addPage(Section.WEATHER, cWeather, "ΚΑΙΡΟΣ")
+        addPage(Section.BATTERY, cBattery, "ΜΠΑΤΑΡΙΑ")
+        addPage(Section.COROS, cCoros, "COROS · ΠΡΟΓΡΑΜΜΑ")
+        addPage(Section.CAL, cCal, "ΗΜΕΡΟΛΟΓΙΟ · 7 ΗΜΕΡΕΣ")
+        addPage(Section.NOTIF, cNotif, "ΕΙΔΟΠΟΙΗΣΕΙΣ")
+
+        // Πλοήγηση σε όλη την οθόνη
+        val nb = bodies.getValue(Section.NAV)
+        nb.gravity = Gravity.CENTER_VERTICAL
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        navArrowBig = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+        row.addView(navArrowBig, LinearLayout.LayoutParams(dp(190), dp(190)).apply { marginEnd = dp(28) })
+        val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        navDistBig = tv("", 76f, white, light = true).apply { includeFontPadding = false; maxLines = 1 }
+        navInstrBig = tv("", 32f, soft).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
+        navEtaBig = tv("", 20f, cNav).apply { setPadding(0, dp(14), 0, 0); maxLines = 1 }
+        col.addView(navDistBig); col.addView(navInstrBig); col.addView(navEtaBig)
+        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        nb.addView(row)
+    }
+
+    /** Πλήρης οθόνη για μία κατηγορία: χρωματιστό πλαίσιο σε όλη την οθόνη, πάτημα = επιστροφή. */
+    private fun addPage(sec: Section, color: Int, title: String) {
+        val page = FrameLayout(ctx).apply {
+            setPadding(dp(18), dp(14), dp(18), dp(14))
+            visibility = View.GONE
+            isClickable = true
+            setOnClickListener { close() }
+        }
+        val frame = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(14), dp(22), dp(16))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(28).toFloat()
+                setColor(withAlpha(color, 0x22))
+                setStroke(dp(2), withAlpha(color, 0x99))
+            }
+        }
+        val header = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        header.addView(tv(title, 14f, color).apply {
+            letterSpacing = 0.15f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        val small = tv("", 18f, grey, light = true)
+        smallClocks += small
+        header.addView(small)
+        frame.addView(header)
+        val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        frame.addView(body, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(10) })
+        page.addView(frame, FrameLayout.LayoutParams(-1, -1))
+        detailLayer.addView(page, FrameLayout.LayoutParams(-1, -1))
+        pages[sec] = page
+        bodies[sec] = body
     }
 
     // ---------- Ρολόι, νύχτα, προστασία οθόνης ----------
@@ -228,7 +380,9 @@ class Dashboard(
         clock.text = t
         for (c in smallClocks) c.text = t
 
-        if (pager.current != 0 && System.currentTimeMillis() - lastTouch > 90_000) pager.goTo(0)
+        // Επιστροφή στην αρχική μετά από 90" (εκτός από την πλοήγηση)
+        if (openSection != null && openSection != Section.NAV &&
+            System.currentTimeMillis() - lastTouch > 90_000) close()
 
         val cal = Calendar.getInstance()
         val minute = cal.get(Calendar.MINUTE)
@@ -237,9 +391,12 @@ class Dashboard(
 
         date.text = dateFmt.format(now).replaceFirstChar { it.uppercase(el) }
 
+        // Μικρή μετατόπιση κάθε λεπτό για να μη «καίγεται» η οθόνη
         val px = dp(6).toFloat()
-        pager.translationX = Random.nextFloat() * 2 * px - px
-        pager.translationY = Random.nextFloat() * 2 * px - px
+        val dx = Random.nextFloat() * 2 * px - px
+        val dy = Random.nextFloat() * 2 * px - px
+        homeLayer.translationX = dx; homeLayer.translationY = dy
+        detailLayer.translationX = dx; detailLayer.translationY = dy
 
         val hour = cal.get(Calendar.HOUR_OF_DAY)
         val isNight = Prefs.nightMode(ctx) && (hour >= 23 || hour < 7)
@@ -273,17 +430,30 @@ class Dashboard(
         val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
         val status = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        val plugged = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+        val temp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f
         val pct = if (level >= 0) level * 100 / scale else 0
-        val sub = when (status) {
+        val state = when (status) {
             BatteryManager.BATTERY_STATUS_FULL -> "Πλήρης"
             BatteryManager.BATTERY_STATUS_CHARGING -> "Φορτίζει"
-            else -> ""
+            else -> "Σε μπαταρία"
         }
         val icon = if (status == BatteryManager.BATTERY_STATUS_CHARGING) "⚡" else "🔋"
-        setText(homeBattery, listOfNotNull(
+        setBody(tileBodies.getValue(Section.BATTERY),
             tv("$icon $pct%", 22f, white, light = true),
-            if (sub.isNotEmpty()) tv(sub, 13f, cBattery) else null
-        ))
+            tv(state, 12f, cBattery))
+
+        val source = when (plugged) {
+            BatteryManager.BATTERY_PLUGGED_AC -> "Πρίζα"
+            BatteryManager.BATTERY_PLUGGED_USB -> "USB"
+            BatteryManager.BATTERY_PLUGGED_WIRELESS -> "Ασύρματη φόρτιση"
+            else -> "—"
+        }
+        val body = bodies.getValue(Section.BATTERY)
+        body.gravity = Gravity.CENTER
+        setBody(body,
+            tv("$icon $pct%", 96f, white, thin = true).apply { gravity = Gravity.CENTER },
+            tv("$state · $source · ${"%.1f".format(temp)}°C", 20f, cBattery).apply { gravity = Gravity.CENTER })
     }
 
     // ---------- Ημερολόγιο ----------
@@ -338,31 +508,30 @@ class Dashboard(
 
     private fun loadEvents() {
         val list = queryEvents(8)
+        val tileBody = tileBodies.getValue(Section.CAL)
+        val calBody = bodies.getValue(Section.CAL)
 
-        // Αρχική
         if (list == null) {
-            homeEventsCard.visibility = View.GONE
-        } else {
-            homeEventsCard.visibility = View.VISIBLE
-            val near = list.filter { dayOffset(it) <= 1 }.take(3)
-            val rows = near.map { e ->
-                val off = dayOffset(e)
-                val whenTxt = when {
-                    e.allDay -> if (off == 0) "Σήμερα" else "Αύριο"
-                    off == 0 -> timeFmt.format(Date(e.begin))
-                    else -> "Αύρ. ${timeFmt.format(Date(e.begin))}"
-                }
-                eventLine(whenTxt, e.title, e.color, 15f)
-            }
-            setText(homeEvents, rows.ifEmpty { listOf(tv("Τίποτα για σήμερα και αύριο", 14f, grey)) })
-        }
-
-        // Σελίδα ημερολογίου: πλέγμα 4 + 3 ημερών
-        calBody.removeAllViews()
-        if (list == null) {
-            calBody.addView(tv("Δώσε άδεια ημερολογίου από την εφαρμογή StandBy.", 18f, grey))
+            setBody(tileBody, tv("Χωρίς άδεια", 13f, grey))
+            setBody(calBody, tv("Δώσε άδεια ημερολογίου από την εφαρμογή StandBy.", 18f, grey))
             return
         }
+
+        // Πλακίδιο: τα 2 επόμενα
+        val near = list.filter { dayOffset(it) <= 1 }.take(2)
+        if (near.isEmpty()) setBody(tileBody, tv("Τίποτα σήμερα/αύριο", 13f, grey))
+        else setBody(tileBody, *near.map { e ->
+            val off = dayOffset(e)
+            val whenTxt = when {
+                e.allDay -> if (off == 0) "Σήμ." else "Αύρ."
+                off == 0 -> timeFmt.format(Date(e.begin))
+                else -> "Αύρ."
+            }
+            eventLine(whenTxt, e.title, e.color, 13f)
+        }.toTypedArray())
+
+        // Πλήρης οθόνη: πλέγμα 4 + 3 ημερών
+        calBody.removeAllViews()
         val byDay = list.groupBy { dayOffset(it) }
         for (r in 0..1) {
             val rowView = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
@@ -373,14 +542,13 @@ class Dashboard(
                 if (evs.isEmpty()) body.addView(tv("—", 14f, dim))
                 for (e in evs.take(3)) {
                     val t = if (e.allDay) "Ολοήμ." else timeFmt.format(Date(e.begin))
-                    body.addView(eventLine(t, e.title, e.color, 13f))
+                    body.addView(eventLine(t, e.title, e.color, 14f))
                 }
                 if (evs.size > 3) body.addView(tv("+${evs.size - 3} ακόμα", 12f, grey))
                 rowView.addView(c, LinearLayout.LayoutParams(0, -1, 1f).apply {
                     if (d != range.first) marginStart = dp(8)
                 })
             }
-            // η 2η σειρά έχει 3 κάρτες: κενό στο τέλος για ίδιο πλάτος
             if (r == 1) rowView.addView(View(ctx), LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(8) })
             calBody.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
         }
@@ -419,10 +587,12 @@ class Dashboard(
     }
 
     private fun renderCoros(list: List<Coros.Workout>?, error: String?) {
-        corosBody.removeAllViews()
+        val tileBody = tileBodies.getValue(Section.COROS)
+        val body = bodies.getValue(Section.COROS)
+        body.removeAllViews()
         if (list == null) {
-            homeCorosCard.visibility = View.GONE
-            corosBody.addView(tv(error ?: "", 18f, grey))
+            setBody(tileBody, tv(if (Coros.configured(ctx)) "Σφάλμα σύνδεσης" else "Δεν έχει συνδεθεί", 14f, grey))
+            body.addView(tv(error ?: "", 18f, grey))
             return
         }
         val fmt = SimpleDateFormat("yyyyMMdd", Locale.US)
@@ -431,24 +601,24 @@ class Dashboard(
         val today = list.filter { it.day == todayKey }
         val next = list.filter { it.day > todayKey }
 
-        // Αρχική
-        homeCorosCard.visibility = View.VISIBLE
         val main = today.firstOrNull { !it.completed } ?: today.firstOrNull()
-        setText(homeCoros, listOf(
-            if (main == null) tv("😴 Ξεκούραση", 17f, white)
-            else tv("${Coros.sportLabel(main.sport).first} ${main.name}" + (if (main.completed) " ✓" else ""),
-                17f, white).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
-            tv(if (main != null && main.minutes > 0) "${main.minutes}′" else " ", 13f, cCoros)
-        ))
+        val tileLine = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        tileLine.addView(
+            (if (main == null) tv("😴 Ξεκούραση", 17f, white)
+            else tv("${Coros.sportLabel(main.sport).first} ${main.name}" + (if (main.completed) " ✓" else ""), 17f, white))
+                .apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+            LinearLayout.LayoutParams(0, -2, 1f))
+        if (main != null && main.minutes > 0) tileLine.addView(tv("  ${main.minutes}′", 15f, cCoros))
+        setBody(tileBody, tileLine)
 
         val cols = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
 
         val (todayCard, tBody) = card(cCoros, "ΣΗΜΕΡΑ")
         tBody.gravity = Gravity.CENTER_VERTICAL
-        if (today.isEmpty()) tBody.addView(tv("😴 Ξεκούραση", 32f, white, light = true))
+        if (today.isEmpty()) tBody.addView(tv("😴 Ξεκούραση", 34f, white, light = true))
         for (w in today) {
             val (icon, sport) = Coros.sportLabel(w.sport)
-            tBody.addView(tv("$icon ${w.name}", 30f, if (w.completed) cBattery else white, light = true).apply {
+            tBody.addView(tv("$icon ${w.name}", 32f, if (w.completed) cBattery else white, light = true).apply {
                 maxLines = 2; ellipsize = TextUtils.TruncateAt.END
                 setPadding(0, dp(4), 0, 0)
             })
@@ -456,7 +626,7 @@ class Dashboard(
                 append(sport)
                 if (w.minutes > 0) append(" · ${w.minutes}′")
                 if (w.completed) append(" · ✓ Ολοκληρώθηκε")
-            }, 16f, if (w.completed) cBattery else cCoros))
+            }, 17f, if (w.completed) cBattery else cCoros))
         }
         cols.addView(todayCard, LinearLayout.LayoutParams(0, -1, 1.1f))
 
@@ -469,16 +639,15 @@ class Dashboard(
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(3), 0, dp(3))
             }
-            line.addView(tv(label, 14f, cCoros), LinearLayout.LayoutParams(dp(92), -2))
+            line.addView(tv(label, 15f, cCoros), LinearLayout.LayoutParams(dp(100), -2))
             line.addView(tv("${Coros.sportLabel(w.sport).first} ${w.name}" +
-                (if (w.minutes > 0) " · ${w.minutes}′" else ""), 15f, soft).apply {
+                (if (w.minutes > 0) " · ${w.minutes}′" else ""), 16f, soft).apply {
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(0, -2, 1f))
             nBody.addView(line)
         }
         cols.addView(nextCard, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(10) })
-
-        corosBody.addView(cols, LinearLayout.LayoutParams(-1, -1))
+        body.addView(cols, LinearLayout.LayoutParams(-1, -1))
     }
 
     // ---------- Καιρός ----------
@@ -491,33 +660,33 @@ class Dashboard(
                 handler.post { renderWeather(data) }
             } catch (_: Exception) {
                 handler.post {
-                    if (weatherText == "…") setText(homeWeather, listOf(tv("Χωρίς σύνδεση", 15f, grey)))
+                    if (!weatherReady) setBody(tileBodies.getValue(Section.WEATHER), tv("Χωρίς σύνδεση", 14f, grey))
                 }
             }
         }.start()
     }
 
     private fun renderWeather(w: Weather.Data) {
+        weatherReady = true
         val (icon, desc) = Weather.text(w.code)
         val today = w.days.firstOrNull()
-        weatherText = "$icon ${w.temp}°"
+        val now = "$icon ${w.temp}°"
         val range = if (today != null) "↑${today.max}° ↓${today.min}°" else ""
 
-        // Αρχική
         val line = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        line.addView(tv(weatherText, 26f, white, light = true))
-        line.addView(tv("   $desc\n   $range", 13f, grey))
-        setText(homeWeather, listOf(line))
+        line.addView(tv(now, 24f, white, light = true))
+        line.addView(tv("  $desc\n  $range", 12f, grey).apply { maxLines = 2 })
+        setBody(tileBodies.getValue(Section.WEATHER), line)
 
-        // Σελίδα καιρού
-        weatherBody.removeAllViews()
+        val body = bodies.getValue(Section.WEATHER)
+        body.removeAllViews()
         val top = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
 
         val (nowCard, nowBody) = card(cWeather, "ΤΩΡΑ")
         nowBody.gravity = Gravity.CENTER_VERTICAL
-        nowBody.addView(tv(weatherText, 40f, white, light = true))
-        nowBody.addView(tv(desc, 15f, soft))
-        if (today != null) nowBody.addView(tv("$range · 💧${today.rain}%", 14f, cWeather))
+        nowBody.addView(tv(now, 44f, white, light = true))
+        nowBody.addView(tv(desc, 16f, soft))
+        if (today != null) nowBody.addView(tv("$range · 💧${today.rain}%", 15f, cWeather))
         top.addView(nowCard, LinearLayout.LayoutParams(0, -1, 1f))
 
         val (daysCard, daysBody) = card(cWeather, "ΕΠΟΜΕΝΕΣ ΜΕΡΕΣ")
@@ -528,15 +697,14 @@ class Dashboard(
                 if (d.rain >= 20) "💧${d.rain}%" else " ")
         }), LinearLayout.LayoutParams(-1, -1))
         top.addView(daysCard, LinearLayout.LayoutParams(0, -1, 2f).apply { marginStart = dp(8) })
-
-        weatherBody.addView(top, LinearLayout.LayoutParams(-1, 0, 1f))
+        body.addView(top, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val (hCard, hBody) = card(cWeather, "ΕΠΟΜΕΝΕΣ ΩΡΕΣ")
         hBody.addView(columns(w.hours.filterIndexed { i, _ -> i % 2 == 0 }.take(8).map { h ->
             Triple(timeFmt.format(Date(h.time)), "${Weather.text(h.code).first}\n${h.temp}°",
                 if (h.rain >= 20) "💧${h.rain}%" else " ")
         }), LinearLayout.LayoutParams(-1, -1))
-        weatherBody.addView(hCard, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
+        body.addView(hCard, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
     }
 
     private fun columns(items: List<Triple<String, String, String>>): LinearLayout {
@@ -544,7 +712,7 @@ class Dashboard(
         for ((a, b, c) in items) {
             val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
             col.addView(tv(a, 13f, cWeather))
-            col.addView(tv(b, 16f, white).apply { gravity = Gravity.CENTER })
+            col.addView(tv(b, 17f, white).apply { gravity = Gravity.CENTER })
             col.addView(tv(c, 11f, grey))
             row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
         }
@@ -571,55 +739,93 @@ class Dashboard(
         return p.getFloat(Prefs.KEY_LAT, 37.98f).toDouble() to p.getFloat(Prefs.KEY_LON, 23.73f).toDouble()
     }
 
-    // ---------- Ειδοποιήσεις: πλέγμα 3 x 2 ----------
+    // ---------- Πλοήγηση Google Maps ----------
 
     private fun updateNav() {
         val n = NotifListener.nav(ctx)
+        val navTile = tiles.getValue(Section.NAV)
         if (n == null) {
-            if (navActive) { navActive = false; navBlock.visibility = View.GONE; clockBlock.visibility = View.VISIBLE }
+            if (navActive) {
+                navActive = false
+                if (openSection == Section.NAV) close()
+                navTile.visibility = View.GONE
+                clockBlock.visibility = View.VISIBLE
+            }
             return
         }
         if (!navActive) {
             navActive = true
-            navBlock.visibility = View.VISIBLE
+            navTile.visibility = View.VISIBLE
             clockBlock.visibility = View.GONE
-            pager.goTo(0)
+            // «Σκάει» στην οθόνη με ελατήριο
+            navTile.scaleX = 0.6f; navTile.scaleY = 0.6f; navTile.alpha = 0f
+            navTile.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(700)
+                .setInterpolator(SpringInterpolator()).start()
         }
-        navDistance.text = n.distance
-        navInstruction.text = n.instruction
-        navEta.text = n.eta
-        if (n.arrow != null) { navArrow.setImageDrawable(n.arrow); navArrow.visibility = View.VISIBLE }
-        else navArrow.visibility = View.GONE
+
+        // Πλακίδιο αρχικής
+        val tb = tileBodies.getValue(Section.NAV)
+        tb.gravity = Gravity.CENTER_VERTICAL
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        if (n.arrow != null) row.addView(ImageView(ctx).apply {
+            setImageDrawable(n.arrow?.constantState?.newDrawable()?.mutate() ?: n.arrow)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }, LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginEnd = dp(12) })
+        val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(tv(n.distance, 40f, white, light = true).apply { maxLines = 1; includeFontPadding = false })
+        col.addView(tv(n.instruction, 19f, soft).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END })
+        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        setBody(tb, row, tv(n.eta, 15f, cNav).apply {
+            setPadding(0, dp(8), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+        })
+
+        // Πλήρης οθόνη
+        navDistBig.text = n.distance
+        navInstrBig.text = n.instruction
+        navEtaBig.text = n.eta
+        if (n.arrow != null) { navArrowBig.setImageDrawable(n.arrow); navArrowBig.visibility = View.VISIBLE }
+        else navArrowBig.visibility = View.GONE
     }
+
+    // ---------- Ειδοποιήσεις ----------
 
     private fun loadNotifications() {
         updateNav()
-        notifBody.removeAllViews()
+        val tileBody = tileBodies.getValue(Section.NOTIF)
+        val body = bodies.getValue(Section.NOTIF)
+        body.removeAllViews()
         if (!NotifListener.enabled(ctx)) {
-            notifBody.addView(tv("Δώσε πρόσβαση στις ειδοποιήσεις από την εφαρμογή StandBy.", 18f, grey))
+            setBody(tileBody, tv("Χωρίς άδεια", 13f, grey))
+            body.addView(tv("Δώσε πρόσβαση στις ειδοποιήσεις από την εφαρμογή StandBy.", 18f, grey))
             return
         }
-        val items = NotifListener.current(ctx).take(6)
-        if (items.isEmpty()) {
-            notifBody.addView(tv("Καμία ειδοποίηση 🎉", 20f, grey))
+        val all = NotifListener.current(ctx)
+        if (all.isEmpty()) {
+            setBody(tileBody, tv("0", 30f, white, light = true), tv("Καμία", 12f, grey))
+            body.addView(tv("Καμία ειδοποίηση 🎉", 20f, grey))
             return
         }
+        setBody(tileBody,
+            tv("${all.size}", 30f, white, light = true).apply { includeFontPadding = false },
+            tv(all.first().app, 12f, cNotif).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+
+        val items = all.take(6)
         for (r in 0..1) {
             val rowView = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
             for (c in 0..2) {
                 val n = items.getOrNull(r * 3 + c)
                 val lpCard = LinearLayout.LayoutParams(0, -1, 1f).apply { if (c > 0) marginStart = dp(8) }
                 if (n == null) { rowView.addView(View(ctx), lpCard); continue }
-                val (cardView, body) = card(cNotif, "${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el))
-                if (n.title.isNotBlank()) body.addView(tv(n.title, 16f, white).apply {
+                val (cardView, cb) = card(cNotif, "${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el))
+                if (n.title.isNotBlank()) cb.addView(tv(n.title, 16f, white).apply {
                     maxLines = 1; ellipsize = TextUtils.TruncateAt.END
                 })
-                if (n.text.isNotBlank()) body.addView(tv(n.text, 14f, grey).apply {
+                if (n.text.isNotBlank()) cb.addView(tv(n.text, 14f, grey).apply {
                     maxLines = 3; ellipsize = TextUtils.TruncateAt.END
                 })
                 rowView.addView(cardView, lpCard)
             }
-            notifBody.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
+            body.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
         }
     }
 
@@ -631,7 +837,7 @@ class Dashboard(
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(10), dp(14), dp(10))
             background = GradientDrawable().apply {
-                cornerRadius = dp(18).toFloat()
+                cornerRadius = dp(20).toFloat()
                 setColor(withAlpha(accent, 0x26))
                 setStroke(dp(1), withAlpha(accent, 0x80))
             }
@@ -648,47 +854,9 @@ class Dashboard(
 
     private fun withAlpha(color: Int, a: Int) = Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
 
-    private fun setText(container: LinearLayout, views: List<View>) {
+    private fun setBody(container: LinearLayout, vararg views: View) {
         container.removeAllViews()
         for (v in views) container.addView(v)
-    }
-
-    /** Σελίδα με τίτλο και μικρό ρολόι· επιστρέφει το σώμα της. */
-    private fun addPage(title: String): LinearLayout {
-        val page = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(32), dp(14), dp(40), dp(18))
-        }
-        val header = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        header.addView(tv(title, 13f, dim).apply { letterSpacing = 0.15f }, LinearLayout.LayoutParams(0, -2, 1f))
-        val small = tv("", 18f, grey, light = true)
-        smallClocks += small
-        header.addView(small)
-        page.addView(header)
-
-        val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        page.addView(body, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
-        pager.addView(page)
-        return body
-    }
-
-    private fun buildDots() {
-        dots.removeAllViews()
-        for (i in 0 until pager.childCount) {
-            dots.addView(View(ctx), LinearLayout.LayoutParams(dp(6), dp(6)).apply {
-                topMargin = dp(4); bottomMargin = dp(4)
-            })
-        }
-        updateDots(0)
-    }
-
-    private fun updateDots(page: Int) {
-        for (i in 0 until dots.childCount) {
-            dots.getChildAt(i).background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(if (i == page) Color.parseColor("#BBBBBB") else Color.parseColor("#444444"))
-            }
-        }
     }
 
     private fun tv(text: String, size: Float, color: Int, light: Boolean = false, thin: Boolean = false) =
@@ -701,8 +869,6 @@ class Dashboard(
                 Typeface.NORMAL
             )
         }
-
-    private fun lp(w: Int, h: Int) = LinearLayout.LayoutParams(w, h)
 
     private fun dp(v: Int) =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics).toInt()
