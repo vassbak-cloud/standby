@@ -30,9 +30,20 @@ class StandbyService : Service() {
     companion object {
         private const val CHANNEL = "standby_service"
 
+        fun needed(ctx: Context) = Prefs.autoMode(ctx) != Prefs.AUTO_OFF || Prefs.wakeOnCharging(ctx)
+
+        private fun charging(c: Context) = (c.getSystemService(BATTERY_SERVICE) as BatteryManager).isCharging
+
+        private fun launch(c: Context) {
+            if (!Settings.canDrawOverlays(c)) return
+            c.startActivity(Intent(c, PreviewActivity::class.java).addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            ))
+        }
+
         fun sync(ctx: Context) {
             val i = Intent(ctx, StandbyService::class.java)
-            if (Prefs.autoMode(ctx) == Prefs.AUTO_OFF) ctx.stopService(i)
+            if (!needed(ctx)) ctx.stopService(i)
             else ctx.startForegroundService(i)
         }
     }
@@ -42,15 +53,20 @@ class StandbyService : Service() {
             // Αν ο χρήστης έσβησε την οθόνη ενώ έβλεπε το StandBy, την αφήνουμε σβηστή
             if (State.showing || System.currentTimeMillis() - State.lastStop < 3000) return
             if (!shouldShow(c)) return
-            if (!Settings.canDrawOverlays(c)) return
-            c.startActivity(Intent(c, PreviewActivity::class.java).addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            ))
+            launch(c)
+        }
+    }
+
+    /** Ανάβει η οθόνη (κουμπί ή διπλό ταπ του κινητού) ενώ φορτίζει → StandBy. */
+    private val screenOn = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (State.showing || !Prefs.wakeOnCharging(c) || !charging(c)) return
+            launch(c)
         }
     }
 
     private fun shouldShow(c: Context): Boolean = when (Prefs.autoMode(c)) {
-        Prefs.AUTO_CHARGING -> (c.getSystemService(BATTERY_SERVICE) as BatteryManager).isCharging
+        Prefs.AUTO_CHARGING -> charging(c)
         Prefs.AUTO_NAV -> NotifListener.nav(c) != null
         Prefs.AUTO_ALWAYS -> true
         else -> false
@@ -68,7 +84,7 @@ class StandbyService : Service() {
         val n = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle("StandBy σε αναμονή")
-            .setContentText("Ανοίγει όταν σβήνει η οθόνη")
+            .setContentText("Ανοίγει αυτόματα σύμφωνα με τις ρυθμίσεις")
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -78,15 +94,17 @@ class StandbyService : Service() {
             startForeground(1, n)
         }
         registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        registerReceiver(screenOn, IntentFilter(Intent.ACTION_SCREEN_ON))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (Prefs.autoMode(this) == Prefs.AUTO_OFF) stopSelf()
+        if (!needed(this)) stopSelf()
         return START_STICKY
     }
 
     override fun onDestroy() {
         try { unregisterReceiver(screenOff) } catch (_: Exception) {}
+        try { unregisterReceiver(screenOn) } catch (_: Exception) {}
         super.onDestroy()
     }
 

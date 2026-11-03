@@ -93,6 +93,20 @@ class MainActivity : Activity() {
             updateStatus()
         }
         col.addView(autoGroup)
+        col.addView(Switch(this).apply {
+            text = "Άνοιγμα όταν ανάβει η οθόνη στον φορτιστή (π.χ. με διπλό ταπ)"
+            textSize = 16f
+            isChecked = Prefs.wakeOnCharging(this@MainActivity)
+            setPadding(0, pad / 2, 0, pad / 2)
+            setOnCheckedChangeListener { _, on ->
+                Prefs.get(this@MainActivity).edit().putBoolean(Prefs.KEY_WAKE_CHARGING, on).apply()
+                if (on && !Settings.canDrawOverlays(this@MainActivity)) {
+                    Toast.makeText(this@MainActivity, "Δώσε την άδεια «Εμφάνιση πάνω από άλλες εφαρμογές»", Toast.LENGTH_LONG).show()
+                }
+                StandbyService.sync(this@MainActivity)
+            }
+        })
+        col.addView(text("Για να ανάβει με διπλό ταπ, ενεργοποίησε στις ρυθμίσεις του κινητού το «Διπλό πάτημα για ενεργοποίηση οθόνης»."))
         col.addView(button("Άδεια «Εμφάνιση πάνω από άλλες εφαρμογές»") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 android.net.Uri.parse("package:$packageName")))
