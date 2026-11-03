@@ -115,6 +115,8 @@ class Dashboard(
     private var navActive = false
 
     private var weatherReady = false
+    private var charging = true
+    private lateinit var aodPill: TextView
     private var lastMinute = -1
     private var night: Boolean? = null
     private var lastTouch = System.currentTimeMillis()
@@ -179,6 +181,7 @@ class Dashboard(
 
     fun start() {
         State.showing = true
+        State.timedOut = false
         startPocket()
         ctx.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { showBattery(it) }
         NotifListener.onChange = { handler.post { loadNotifications() } }
@@ -232,6 +235,23 @@ class Dashboard(
         root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
 
         homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
+
+        // Κουμπί Always On (φαίνεται μόνο εκτός φόρτισης)
+        aodPill = tv("", 13f, white).apply {
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            isClickable = true
+            visibility = View.GONE
+            setOnClickListener {
+                Prefs.get(ctx).edit().putBoolean(Prefs.KEY_AOD, !Prefs.alwaysOn(ctx)).apply()
+                styleAod()
+                scaleX = 0.85f; scaleY = 0.85f
+                animate().scaleX(1f).scaleY(1f).setDuration(500).setInterpolator(SpringInterpolator()).start()
+            }
+        }
+        styleAod()
+        homeLayer.addView(aodPill, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = dp(34); bottomMargin = dp(14)
+        })
     }
 
     private fun tileRow(vararg items: Pair<Section, Float>): LinearLayout {
@@ -275,6 +295,16 @@ class Dashboard(
             true
         }
         return outer
+    }
+
+    private fun styleAod() {
+        val on = Prefs.alwaysOn(ctx)
+        aodPill.text = if (on) "◉  Always On" else "◯  Always On · κλείνει σε 1′"
+        aodPill.setTextColor(if (on) Color.BLACK else grey)
+        aodPill.background = GradientDrawable().apply {
+            cornerRadius = dp(16).toFloat()
+            if (on) setColor(amber) else { setColor(Color.parseColor("#1AFFFFFF")); setStroke(dp(1), Color.parseColor("#44FFFFFF")) }
+        }
     }
 
     private fun springBack(v: View) {
@@ -513,6 +543,14 @@ class Dashboard(
         if (openSection != null && openSection != Section.NAV &&
             System.currentTimeMillis() - lastTouch > 90_000) close()
 
+        // Εκτός φόρτισης, χωρίς Always On και χωρίς πλοήγηση: κλείνει μετά από 1 λεπτό αδράνειας
+        if (!charging && !Prefs.alwaysOn(ctx) && !navActive &&
+            System.currentTimeMillis() - lastTouch > 60_000) {
+            lastTouch = System.currentTimeMillis()
+            State.timedOut = true
+            onExit()
+        }
+
         val cal = Calendar.getInstance()
         val minute = cal.get(Calendar.MINUTE)
         if (minute == lastMinute) return
@@ -562,6 +600,8 @@ class Dashboard(
         val plugged = i.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
         val temp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f
         val pct = if (level >= 0) level * 100 / scale else 0
+        charging = plugged != 0
+        aodPill.visibility = if (charging) View.GONE else View.VISIBLE
         val state = when (status) {
             BatteryManager.BATTERY_STATUS_FULL -> "Πλήρης"
             BatteryManager.BATTERY_STATUS_CHARGING -> "Φορτίζει"
@@ -953,7 +993,7 @@ class Dashboard(
                 if (n.text.isNotBlank()) cb.addView(tv(n.text, 14f, grey).apply {
                     maxLines = 3; ellipsize = TextUtils.TruncateAt.END
                 })
-                swipeToDismiss(cardView, n.key)
+                swipeToDismiss(cardView, n.key) { showNotifDetail(n) }
                 rowView.addView(cardView, lpCard)
             }
             body.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
@@ -1121,7 +1161,7 @@ class Dashboard(
     }
 
     /** Σύρσιμο αριστερά/δεξιά: η κάρτα φεύγει και η ειδοποίηση διαγράφεται· αλλιώς γυρίζει με ελατήριο. */
-    private fun swipeToDismiss(card: View, key: String) {
+    private fun swipeToDismiss(card: View, key: String, onTap: () -> Unit) {
         var downX = 0f
         var downY = 0f
         var dragging = false
@@ -1165,12 +1205,77 @@ class Dashboard(
                     } else {
                         v.animate().translationX(0f).rotation(0f).alpha(1f).setDuration(550)
                             .setInterpolator(SpringInterpolator(7f, 15f)).start()
+                        if (!dragging && e.actionMasked == MotionEvent.ACTION_UP &&
+                            kotlin.math.abs(e.rawX - downX) < slop && kotlin.math.abs(e.rawY - downY) < slop) onTap()
                     }
                     dragging = false
                 }
             }
             true   // κρατάμε το άγγιγμα ώστε να μην κλείσει η σελίδα
         }
+    }
+
+    /** Όλη η ειδοποίηση σε παράθυρο που «σκάει» με ελατήριο. */
+    private fun showNotifDetail(n: NotifListener.Item) {
+        val overlay = FrameLayout(ctx).apply {
+            setBackgroundColor(Color.argb(0xB8, 0, 0, 0))
+            isClickable = true
+        }
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(18), dp(24), dp(16))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(26).toFloat()
+                setColor(Color.parseColor("#1C1C1E"))
+                setStroke(dp(2), withAlpha(cNotif, 0xAA))
+            }
+            isClickable = true   // πάτημα μέσα στο παράθυρο δεν το κλείνει
+        }
+        box.addView(tv("${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el), 12f, cNotif).apply {
+            letterSpacing = 0.12f
+        })
+        if (n.title.isNotBlank()) box.addView(tv(n.title, 22f, white).apply { setPadding(0, dp(4), 0, dp(6)) })
+        val scroll = android.widget.ScrollView(ctx).apply { isVerticalScrollBarEnabled = true }
+        scroll.addView(tv(n.full.ifBlank { n.text }, 17f, soft).apply { setLineSpacing(0f, 1.15f) })
+        box.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        fun dismissPopup() {
+            box.animate().scaleX(0.85f).scaleY(0.85f).alpha(0f).setDuration(180).start()
+            overlay.animate().alpha(0f).setDuration(200).withEndAction { view.removeView(overlay) }.start()
+        }
+        fun pill(label: String, color: Int, filled: Boolean, onTap: () -> Unit) = tv(label, 16f, white).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(20), dp(10), dp(20), dp(10))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(22).toFloat()
+                setColor(if (filled) color else withAlpha(color, 0x30))
+            }
+            isClickable = true
+            setOnClickListener { onTap() }
+        }
+        val btns = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END }
+        btns.addView(pill("Διαγραφή", Color.parseColor("#FF453A"), false) {
+            NotifListener.dismiss(n.key); dismissPopup(); handler.postDelayed({ loadNotifications() }, 200)
+        })
+        if (n.open != null) btns.addView(pill("Άνοιγμα", cNotif, false) {
+            try { n.open.send() } catch (_: Exception) {}
+            dismissPopup()
+            onExit()   // κλείνει το StandBy ώστε να φανεί η εφαρμογή (μπορεί να ζητήσει ξεκλείδωμα)
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+        btns.addView(pill("Κλείσιμο", grey, true) { dismissPopup() },
+            LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+        box.addView(btns, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+
+        overlay.setOnClickListener { dismissPopup() }
+        val w = (view.width * 0.72f).toInt().coerceAtLeast(dp(320))
+        val h = (view.height * 0.86f).toInt()
+        overlay.addView(box, FrameLayout.LayoutParams(w, h, Gravity.CENTER))
+        view.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+
+        overlay.alpha = 0f
+        overlay.animate().alpha(1f).setDuration(180).start()
+        box.scaleX = 0.6f; box.scaleY = 0.6f
+        box.animate().scaleX(1f).scaleY(1f).setDuration(600).setInterpolator(SpringInterpolator()).start()
     }
 
     // ---------- Βοηθητικά ----------

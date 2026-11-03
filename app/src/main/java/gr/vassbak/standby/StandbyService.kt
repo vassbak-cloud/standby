@@ -19,6 +19,8 @@ import android.provider.Settings
 object State {
     @Volatile var showing = false
     @Volatile var lastStop = 0L
+    /** Έκλεισε μόνο του λόγω αδράνειας εκτός φόρτισης: να μην ξανανοίξει στο επόμενο σβήσιμο. */
+    @Volatile var timedOut = false
 }
 
 /**
@@ -51,7 +53,7 @@ class StandbyService : Service() {
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             // Αν ο χρήστης έσβησε την οθόνη ενώ έβλεπε το StandBy, την αφήνουμε σβηστή
-            if (State.showing || System.currentTimeMillis() - State.lastStop < 3000) return
+            if (State.showing || State.timedOut || System.currentTimeMillis() - State.lastStop < 3000) return
             if (!shouldShow(c)) return
             launch(c)
         }
@@ -60,6 +62,7 @@ class StandbyService : Service() {
     /** Ανάβει η οθόνη (κουμπί ή διπλό ταπ του κινητού) ενώ φορτίζει → StandBy. */
     private val screenOn = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
+            State.timedOut = false
             if (State.showing || !Prefs.wakeOnCharging(c) || !charging(c)) return
             launch(c)
         }

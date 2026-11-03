@@ -11,7 +11,11 @@ import android.service.notification.StatusBarNotification
 /** Διαβάζει τις ενεργές ειδοποιήσεις για τη σελίδα «Ειδοποιήσεις». */
 class NotifListener : NotificationListenerService() {
 
-    data class Item(val app: String, val title: String, val text: String, val time: Long, val key: String)
+    data class Item(
+        val app: String, val title: String, val text: String, val time: Long, val key: String,
+        val full: String,            // όλο το περιεχόμενο (μεγάλο κείμενο, μηνύματα συνομιλίας κ.λπ.)
+        val open: PendingIntent?     // ανοίγει την ειδοποίηση στην εφαρμογή της
+    )
     data class Nav(
         val distance: String, val instruction: String, val eta: String, val arrow: Drawable?,
         val exit: PendingIntent?   // το κουμπί «Έξοδος» της ειδοποίησης του Maps
@@ -58,6 +62,29 @@ class NotifListener : NotificationListenerService() {
             try { instance?.cancelNotification(key) } catch (_: Exception) {}
         }
 
+        /** Όλο το κείμενο: συνομιλία, γραμμές inbox ή μεγάλο κείμενο, ό,τι υπάρχει. */
+        private fun fullText(ex: android.os.Bundle, fallback: String): String {
+            try {
+                @Suppress("DEPRECATION")
+                val msgs = ex.getParcelableArray(Notification.EXTRA_MESSAGES)
+                if (msgs != null && msgs.isNotEmpty()) {
+                    val lines = msgs.mapNotNull { m ->
+                        val b = m as? android.os.Bundle ?: return@mapNotNull null
+                        val t = b.getCharSequence("text")?.toString() ?: return@mapNotNull null
+                        val who = b.getCharSequence("sender")?.toString()
+                            ?: (b.get("sender_person") as? android.app.Person)?.name?.toString()
+                        if (who.isNullOrBlank()) t else "$who: $t"
+                    }
+                    if (lines.isNotEmpty()) return lines.joinToString("\n\n")
+                }
+            } catch (_: Exception) {}
+            val inbox = ex.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            if (inbox != null && inbox.isNotEmpty()) return inbox.joinToString("\n") { it.toString() }
+            val big = ex.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+            if (!big.isNullOrBlank()) return big
+            return fallback
+        }
+
         fun current(ctx: Context): List<Item> {
             val svc = instance ?: return emptyList()
             val list = try { svc.activeNotifications ?: emptyArray() } catch (_: Exception) { emptyArray<StatusBarNotification>() }
@@ -74,7 +101,7 @@ class NotifListener : NotificationListenerService() {
                     val app = try {
                         pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString()
                     } catch (_: Exception) { sbn.packageName }
-                    Item(app, title, text, sbn.postTime, sbn.key)
+                    Item(app, title, text, sbn.postTime, sbn.key, fullText(ex, text), sbn.notification.contentIntent)
                 }
                 .sortedByDescending { it.time }
                 .take(12)
