@@ -75,6 +75,17 @@
                 android:textSize="17sp" />
 
             <TextView
+                android:id="@+id/corosToday"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="#5AC8FA"
+                android:textSize="17sp"
+                android:visibility="gone" />
+
+            <TextView
                 android:id="@+id/eventsTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

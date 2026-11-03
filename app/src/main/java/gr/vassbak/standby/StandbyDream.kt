@@ -1,7 +1,6 @@
 package gr.vassbak.standby
 
 import android.service.dreams.DreamService
-import android.view.LayoutInflater
 
 /** Η «προφύλαξη οθόνης» που ξεκινά μόνη της όταν το κινητό φορτίζει. */
 class StandbyDream : DreamService() {
@@ -10,16 +9,15 @@ class StandbyDream : DreamService() {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        isInteractive = false   // ένα άγγιγμα κλείνει την οθόνη, όπως στο iPhone
+        isInteractive = true    // για swipe ανάμεσα στις σελίδες· έξοδος με διπλό πάτημα
         isFullscreen = true
         isScreenBright = true
 
-        val root = LayoutInflater.from(this).inflate(R.layout.dashboard, null)
+        val d = Dashboard(this, onExit = { finish() }, onNightChanged = { night -> isScreenBright = !night })
         val wrapper = RotatedLayout(this, Prefs.rotation(this))
-        wrapper.addView(root)
+        wrapper.addView(d.view)
         setContentView(wrapper)
-
-        dashboard = Dashboard(this, root) { night -> isScreenBright = !night }
+        dashboard = d
     }
 
     override fun onDreamingStarted() {
