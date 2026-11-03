@@ -11,7 +11,7 @@ import android.service.notification.StatusBarNotification
 /** Διαβάζει τις ενεργές ειδοποιήσεις για τη σελίδα «Ειδοποιήσεις». */
 class NotifListener : NotificationListenerService() {
 
-    data class Item(val app: String, val title: String, val text: String, val time: Long)
+    data class Item(val app: String, val title: String, val text: String, val time: Long, val key: String)
     data class Nav(
         val distance: String, val instruction: String, val eta: String, val arrow: Drawable?,
         val exit: PendingIntent?   // το κουμπί «Έξοδος» της ειδοποίησης του Maps
@@ -53,6 +53,11 @@ class NotifListener : NotificationListenerService() {
             return Nav(title, text, sub, arrow, exit?.actionIntent)
         }
 
+        /** Διαγράφει μία ειδοποίηση (όπως το swipe στη γραμμή ειδοποιήσεων). */
+        fun dismiss(key: String) {
+            try { instance?.cancelNotification(key) } catch (_: Exception) {}
+        }
+
         fun current(ctx: Context): List<Item> {
             val svc = instance ?: return emptyList()
             val list = try { svc.activeNotifications ?: emptyArray() } catch (_: Exception) { emptyArray<StatusBarNotification>() }
@@ -69,7 +74,7 @@ class NotifListener : NotificationListenerService() {
                     val app = try {
                         pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString()
                     } catch (_: Exception) { sbn.packageName }
-                    Item(app, title, text, sbn.postTime)
+                    Item(app, title, text, sbn.postTime, sbn.key)
                 }
                 .sortedByDescending { it.time }
                 .take(12)

@@ -930,6 +930,7 @@ class Dashboard(
                 if (n.text.isNotBlank()) cb.addView(tv(n.text, 14f, grey).apply {
                     maxLines = 3; ellipsize = TextUtils.TruncateAt.END
                 })
+                swipeToDismiss(cardView, n.key)
                 rowView.addView(cardView, lpCard)
             }
             body.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
@@ -1094,6 +1095,59 @@ class Dashboard(
         val w = (mTrack.width * frac).toInt()
         mFill.layoutParams = (mFill.layoutParams as FrameLayout.LayoutParams).apply { width = w }
         mFill.requestLayout()
+    }
+
+    /** Σύρσιμο αριστερά/δεξιά: η κάρτα φεύγει και η ειδοποίηση διαγράφεται· αλλιώς γυρίζει με ελατήριο. */
+    private fun swipeToDismiss(card: View, key: String) {
+        var downX = 0f
+        var downY = 0f
+        var dragging = false
+        var tracker: android.view.VelocityTracker? = null
+        val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+        card.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = e.rawX; downY = e.rawY; dragging = false
+                    tracker?.recycle(); tracker = android.view.VelocityTracker.obtain()
+                    tracker?.addMovement(e)
+                    v.animate().cancel()
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    tracker?.addMovement(e)
+                    val dx = e.rawX - downX
+                    if (!dragging && kotlin.math.abs(dx) > slop && kotlin.math.abs(dx) > kotlin.math.abs(e.rawY - downY)) {
+                        dragging = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    if (dragging) {
+                        v.translationX = dx
+                        v.rotation = dx / v.width.coerceAtLeast(1) * 8f
+                        v.alpha = (1f - kotlin.math.abs(dx) / (v.width * 1.2f)).coerceIn(0.15f, 1f)
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    tracker?.addMovement(e)
+                    tracker?.computeCurrentVelocity(1000)
+                    val vx = tracker?.xVelocity ?: 0f
+                    tracker?.recycle(); tracker = null
+                    val dx = v.translationX
+                    val fling = kotlin.math.abs(vx) > 1200 && (vx > 0) == (dx > 0) && kotlin.math.abs(dx) > slop
+                    if (dragging && e.actionMasked == MotionEvent.ACTION_UP &&
+                        (kotlin.math.abs(dx) > v.width * 0.35f || fling)) {
+                        val dir = if (dx >= 0) 1 else -1
+                        v.animate().translationX(dir * view.width.toFloat()).rotation(dir * 14f).alpha(0f)
+                            .setDuration(220).setInterpolator(DecelerateInterpolator())
+                            .withEndAction { NotifListener.dismiss(key); handler.postDelayed({ loadNotifications() }, 150) }
+                            .start()
+                    } else {
+                        v.animate().translationX(0f).rotation(0f).alpha(1f).setDuration(550)
+                            .setInterpolator(SpringInterpolator(7f, 15f)).start()
+                    }
+                    dragging = false
+                }
+            }
+            true   // κρατάμε το άγγιγμα ώστε να μην κλείσει η σελίδα
+        }
     }
 
     // ---------- Βοηθητικά ----------
