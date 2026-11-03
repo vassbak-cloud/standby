@@ -36,7 +36,7 @@ class MainActivity : Activity() {
         col.addView(title("StandBy"))
         col.addView(text(
             "Όταν το κινητό φορτίζει, δείχνει ρολόι, καιρό, μπαταρία, ραντεβού, πρόγραμμα COROS και ειδοποιήσεις. " +
-                "Κάνε swipe πάνω/κάτω για τις σελίδες, διπλό πάτημα για έξοδο.\n\n" +
+                "Κάνε swipe πάνω/κάτω για τις σελίδες, διπλό πάτημα για έξοδο. Όσο τρέχει πλοήγηση Google Maps, δείχνει τις οδηγίες.\n\n" +
                 "Βήματα:\n1. Δώσε τις άδειες.\n2. Πάτα «Ενεργοποίηση» και διάλεξε StandBy.\n" +
                 "3. Στην ίδια οθόνη όρισε να ξεκινά «κατά τη φόρτιση».\n4. Πρόσβαση στις ειδοποιήσεις & COROS (προαιρετικά)."
         ))
@@ -58,6 +58,44 @@ class MainActivity : Activity() {
         })
         col.addView(button("Δοκιμή τώρα") {
             startActivity(Intent(this, PreviewActivity::class.java))
+        })
+
+        // ---------- Αυτόματη εκκίνηση ----------
+        col.addView(title("Όταν σβήνει η οθόνη", 18f))
+        col.addView(text("Ανοίγει το StandBy κάθε φορά που σβήνει η οθόνη (π.χ. στη βάση του αυτοκινήτου). " +
+            "Αν τη σβήσεις εσύ με το κουμπί ενώ φαίνεται το StandBy, μένει σβηστή. Η οθόνη ανοιχτή καταναλώνει μπαταρία."))
+        val autoGroup = RadioGroup(this)
+        val autoOptions = listOf(
+            Prefs.AUTO_OFF to "Ποτέ",
+            Prefs.AUTO_CHARGING to "Μόνο όταν φορτίζει",
+            Prefs.AUTO_NAV to "Μόνο όταν τρέχει πλοήγηση Google Maps",
+            Prefs.AUTO_ALWAYS to "Πάντα"
+        )
+        for ((value, label) in autoOptions) {
+            autoGroup.addView(RadioButton(this).apply {
+                id = 3000 + value
+                text = label
+                textSize = 16f
+                isChecked = Prefs.autoMode(this@MainActivity) == value
+            })
+        }
+        autoGroup.setOnCheckedChangeListener { _, id ->
+            Prefs.get(this).edit().putInt(Prefs.KEY_AUTO, id - 3000).apply()
+            if (id - 3000 != Prefs.AUTO_OFF) {
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+                }
+                if (!Settings.canDrawOverlays(this)) {
+                    Toast.makeText(this, "Δώσε την άδεια «Εμφάνιση πάνω από άλλες εφαρμογές»", Toast.LENGTH_LONG).show()
+                }
+            }
+            StandbyService.sync(this)
+            updateStatus()
+        }
+        col.addView(autoGroup)
+        col.addView(button("Άδεια «Εμφάνιση πάνω από άλλες εφαρμογές»") {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:$packageName")))
         })
 
         // ---------- COROS ----------
@@ -138,6 +176,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         updateStatus()
+        try { StandbyService.sync(this) } catch (_: Exception) {}
     }
 
     override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
@@ -148,8 +187,9 @@ class MainActivity : Activity() {
         fun ok(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
         val cal = if (ok(Manifest.permission.READ_CALENDAR)) "✅" else "❌"
         val loc = if (ok(Manifest.permission.ACCESS_COARSE_LOCATION)) "✅" else "❌ (θα δείχνει Αθήνα)"
-        val notif = if (NotifListener.enabled(this)) "✅" else "❌"
-        status.text = "Ημερολόγιο: $cal\nΤοποθεσία: $loc\nΕιδοποιήσεις: $notif"
+        val notif = if (NotifListener.enabled(this)) "✅" else "❌ (χρειάζεται και για τις οδηγίες Maps)"
+        val overlay = if (Settings.canDrawOverlays(this)) "✅" else "❌"
+        status.text = "Ημερολόγιο: $cal\nΤοποθεσία: $loc\nΕιδοποιήσεις: $notif\nΕμφάνιση πάνω από εφαρμογές: $overlay"
     }
 
     private fun title(s: String, size: Float = 26f) = TextView(this).apply {

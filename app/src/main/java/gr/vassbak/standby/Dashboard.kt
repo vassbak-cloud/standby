@@ -24,6 +24,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import java.text.SimpleDateFormat
@@ -58,6 +59,7 @@ class Dashboard(
     private val cCoros = Color.parseColor("#FF9F0A")
     private val cCal = Color.parseColor("#BF5AF2")
     private val cNotif = Color.parseColor("#FF375F")
+    private val cNav = Color.parseColor("#34C759")
 
     private val white = Color.WHITE
     private val soft = Color.parseColor("#DDDDDD")
@@ -74,6 +76,14 @@ class Dashboard(
     private lateinit var homeCoros: LinearLayout
     private lateinit var homeEventsCard: View
     private lateinit var homeEvents: LinearLayout
+    private lateinit var clockBlock: View
+    private lateinit var navBlock: View
+    private lateinit var navArrow: ImageView
+    private lateinit var navDistance: TextView
+    private lateinit var navInstruction: TextView
+    private lateinit var navEta: TextView
+    private lateinit var navClock: TextView
+    private var navActive = false
 
     // Σώματα των άλλων σελίδων
     private val smallClocks = mutableListOf<TextView>()
@@ -126,6 +136,7 @@ class Dashboard(
     }
 
     fun start() {
+        State.showing = true
         ctx.registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { showBattery(it) }
         NotifListener.onChange = { handler.post { loadNotifications() } }
         handler.post(tick)
@@ -136,6 +147,8 @@ class Dashboard(
     }
 
     fun stop() {
+        if (State.showing) State.lastStop = System.currentTimeMillis()
+        State.showing = false
         handler.removeCallbacksAndMessages(null)
         NotifListener.onChange = null
         try { ctx.unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
@@ -149,11 +162,37 @@ class Dashboard(
             setPadding(dp(32), dp(18), dp(40), dp(18))
         }
 
-        val left = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
+        val left = FrameLayout(ctx)
+        val clockCol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
         clock = tv("00:00", 112f, white, thin = true).apply { includeFontPadding = false }
         date = tv("", 22f, amber, light = true).apply { setPadding(dp(6), 0, 0, 0) }
-        left.addView(clock)
-        left.addView(date)
+        clockCol.addView(clock)
+        clockCol.addView(date)
+        clockBlock = clockCol
+        left.addView(clockCol, FrameLayout.LayoutParams(-1, -1))
+
+        // Πλοήγηση Google Maps: εμφανίζεται στη θέση του ρολογιού όσο τρέχει
+        val (navCard, navBody) = card(cNav, "ΠΛΟΗΓΗΣΗ")
+        navClock = tv("", 16f, grey, light = true)
+        val navRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        navArrow = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+        navRow.addView(navArrow, LinearLayout.LayoutParams(dp(110), dp(110)).apply { marginEnd = dp(14) })
+        val navText = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        navDistance = tv("", 46f, white, light = true).apply { maxLines = 1; includeFontPadding = false }
+        navInstruction = tv("", 21f, soft).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
+        navText.addView(navDistance)
+        navText.addView(navInstruction)
+        navRow.addView(navText, LinearLayout.LayoutParams(0, -2, 1f))
+        navBody.gravity = Gravity.CENTER_VERTICAL
+        navBody.addView(navRow)
+        navEta = tv("", 16f, cNav).apply { setPadding(0, dp(10), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+        navBody.addView(navEta)
+        navCard.addView(navClock, 0)
+        navBlock = navCard
+        navCard.visibility = View.GONE
+        left.addView(navCard, FrameLayout.LayoutParams(-1, -1).apply { marginEnd = dp(10) })
+        smallClocks += navClock
+
         root.addView(left, LinearLayout.LayoutParams(0, -1, 1.2f))
 
         val right = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -534,7 +573,27 @@ class Dashboard(
 
     // ---------- Ειδοποιήσεις: πλέγμα 3 x 2 ----------
 
+    private fun updateNav() {
+        val n = NotifListener.nav(ctx)
+        if (n == null) {
+            if (navActive) { navActive = false; navBlock.visibility = View.GONE; clockBlock.visibility = View.VISIBLE }
+            return
+        }
+        if (!navActive) {
+            navActive = true
+            navBlock.visibility = View.VISIBLE
+            clockBlock.visibility = View.GONE
+            pager.goTo(0)
+        }
+        navDistance.text = n.distance
+        navInstruction.text = n.instruction
+        navEta.text = n.eta
+        if (n.arrow != null) { navArrow.setImageDrawable(n.arrow); navArrow.visibility = View.VISIBLE }
+        else navArrow.visibility = View.GONE
+    }
+
     private fun loadNotifications() {
+        updateNav()
         notifBody.removeAllViews()
         if (!NotifListener.enabled(ctx)) {
             notifBody.addView(tv("Δώσε πρόσβαση στις ειδοποιήσεις από την εφαρμογή StandBy.", 18f, grey))

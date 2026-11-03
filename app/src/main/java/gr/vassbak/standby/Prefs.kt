@@ -16,8 +16,15 @@ object Prefs {
     const val COROS_UID = "coros_uid"
     const val COROS_HOST = "coros_host"
 
+    const val KEY_AUTO = "auto_mode"
+    const val AUTO_OFF = 0
+    const val AUTO_CHARGING = 1
+    const val AUTO_NAV = 2
+    const val AUTO_ALWAYS = 3
+
     fun get(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun rotation(ctx: Context) = get(ctx).getInt(KEY_ROTATION, 90)
+    fun autoMode(ctx: Context) = get(ctx).getInt(KEY_AUTO, AUTO_OFF)
     fun nightMode(ctx: Context) = get(ctx).getBoolean(KEY_NIGHT, true)
 }
