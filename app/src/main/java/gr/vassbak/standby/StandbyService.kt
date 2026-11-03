@@ -32,7 +32,7 @@ class StandbyService : Service() {
 
         fun needed(ctx: Context) = Prefs.autoMode(ctx) != Prefs.AUTO_OFF || Prefs.wakeOnCharging(ctx)
 
-        private fun charging(c: Context) = (c.getSystemService(BATTERY_SERVICE) as BatteryManager).isCharging
+        private fun charging(c: Context) = (c.getSystemService(Context.BATTERY_SERVICE) as BatteryManager).isCharging
 
         private fun launch(c: Context) {
             if (!Settings.canDrawOverlays(c)) return
