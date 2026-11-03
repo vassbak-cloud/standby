@@ -109,6 +109,8 @@ class Dashboard(
     private lateinit var navDistBig: TextView
     private lateinit var navInstrBig: TextView
     private lateinit var navEtaBig: TextView
+    private lateinit var navStopBtn: TextView
+    private var navExit: android.app.PendingIntent? = null
     private var navActive = false
 
     private var weatherReady = false
@@ -336,6 +338,99 @@ class Dashboard(
         col.addView(navDistBig); col.addView(navInstrBig); col.addView(navEtaBig)
         row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
         nb.addView(row)
+
+        // Κουμπί τερματισμού: παρατεταμένο πάτημα → επιβεβαίωση
+        navStopBtn = tv("⏹  Κράτα πατημένο για τερματισμό", 15f, white).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(26).toFloat()
+                setColor(withAlpha(Color.parseColor("#FF453A"), 0x40))
+                setStroke(dp(2), Color.parseColor("#FF453A"))
+            }
+            isClickable = true
+            isLongClickable = true
+            setOnClickListener { v ->
+                // απλό πάτημα: μικρό «κούνημα» για να θυμίσει ότι θέλει κράτημα
+                v.translationX = dp(10).toFloat()
+                v.animate().translationX(0f).setDuration(500).setInterpolator(SpringInterpolator(6f, 30f)).start()
+            }
+            setOnLongClickListener { v ->
+                v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                showStopConfirm(); true
+            }
+            setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(400)
+                        .setInterpolator(DecelerateInterpolator()).start()
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> springBack(v)
+                }
+                false
+            }
+        }
+        nb.addView(navStopBtn, LinearLayout.LayoutParams(-2, -2).apply {
+            gravity = Gravity.END; topMargin = dp(12)
+        })
+    }
+
+    /** Παράθυρο επιβεβαίωσης μέσα στην οθόνη (λειτουργεί και στην προφύλαξη οθόνης). */
+    private fun showStopConfirm() {
+        val red = Color.parseColor("#FF453A")
+        val overlay = FrameLayout(ctx).apply {
+            setBackgroundColor(Color.argb(0xB0, 0, 0, 0))
+            isClickable = true
+        }
+        val box = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(28), dp(22), dp(28), dp(20))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(28).toFloat()
+                setColor(Color.parseColor("#1C1C1E"))
+                setStroke(dp(2), withAlpha(red, 0xAA))
+            }
+        }
+        box.addView(tv("Τερματισμός πλοήγησης;", 24f, white).apply { gravity = Gravity.CENTER })
+        box.addView(tv("Η διαδρομή στο Google Maps θα σταματήσει.", 15f, grey).apply {
+            gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(16))
+        })
+        val btns = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        fun dismiss() {
+            box.animate().scaleX(0.8f).scaleY(0.8f).alpha(0f).setDuration(180).start()
+            overlay.animate().alpha(0f).setDuration(200).withEndAction { view.removeView(overlay) }.start()
+        }
+        fun pill(label: String, color: Int, filled: Boolean, onTap: () -> Unit) = tv(label, 18f, white).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(26), dp(12), dp(26), dp(12))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(24).toFloat()
+                setColor(if (filled) color else withAlpha(color, 0x30))
+            }
+            isClickable = true
+            setOnClickListener { onTap() }
+        }
+        btns.addView(pill("Άκυρο", grey, false) { dismiss() })
+        btns.addView(pill("Τερματισμός", red, true) {
+            val ok = try { navExit?.send(); navExit != null } catch (_: Exception) { false }
+            if (!ok) {
+                box.removeAllViews()
+                box.addView(tv("Δεν βρέθηκε η επιλογή «Έξοδος» στο Maps.\nΚλείσ' το από την ειδοποίηση.", 16f, soft).apply {
+                    gravity = Gravity.CENTER
+                })
+                handler.postDelayed({ dismiss() }, 2500)
+            } else {
+                dismiss()
+            }
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(14) })
+        box.addView(btns)
+        overlay.setOnClickListener { dismiss() }
+        overlay.addView(box, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+        view.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+
+        overlay.alpha = 0f
+        overlay.animate().alpha(1f).setDuration(180).start()
+        box.scaleX = 0.6f; box.scaleY = 0.6f
+        box.animate().scaleX(1f).scaleY(1f).setDuration(600).setInterpolator(SpringInterpolator()).start()
     }
 
     /** Πλήρης οθόνη για μία κατηγορία: χρωματιστό πλαίσιο σε όλη την οθόνη, πάτημα = επιστροφή. */
@@ -783,6 +878,7 @@ class Dashboard(
         navDistBig.text = n.distance
         navInstrBig.text = n.instruction
         navEtaBig.text = n.eta
+        navExit = n.exit
         if (n.arrow != null) { navArrowBig.setImageDrawable(n.arrow); navArrowBig.visibility = View.VISIBLE }
         else navArrowBig.visibility = View.GONE
     }

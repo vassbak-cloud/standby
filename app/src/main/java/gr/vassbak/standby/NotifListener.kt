@@ -1,6 +1,7 @@
 package gr.vassbak.standby
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.content.Context
 import android.graphics.drawable.Drawable
 import android.provider.Settings
@@ -11,7 +12,10 @@ import android.service.notification.StatusBarNotification
 class NotifListener : NotificationListenerService() {
 
     data class Item(val app: String, val title: String, val text: String, val time: Long)
-    data class Nav(val distance: String, val instruction: String, val eta: String, val arrow: Drawable?)
+    data class Nav(
+        val distance: String, val instruction: String, val eta: String, val arrow: Drawable?,
+        val exit: PendingIntent?   // το κουμπί «Έξοδος» της ειδοποίησης του Maps
+    )
 
     companion object {
         @Volatile var instance: NotifListener? = null
@@ -40,7 +44,13 @@ class NotifListener : NotificationListenerService() {
             val sub = ex.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: ""
             if (title.isBlank() && text.isBlank()) return null
             val arrow = try { sbn.notification.getLargeIcon()?.loadDrawable(ctx) } catch (_: Exception) { null }
-            return Nav(title, text, sub, arrow)
+            val actions = sbn.notification.actions ?: emptyArray()
+            val words = listOf("exit", "έξοδ", "τερματ", "stop", "close", "κλείσ", "διακοπ", "end")
+            val exit = actions.firstOrNull { a ->
+                val t = a.title?.toString()?.lowercase() ?: ""
+                words.any { t.contains(it) }
+            } ?: actions.singleOrNull()
+            return Nav(title, text, sub, arrow, exit?.actionIntent)
         }
 
         fun current(ctx: Context): List<Item> {
