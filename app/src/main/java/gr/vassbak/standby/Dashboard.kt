@@ -254,6 +254,8 @@ class Dashboard(
                 clipToPadding = false
                 addView(list)
             }
+            // Διπλό πάτημα στο κενό ανάμεσα/κάτω από τα πλακίδια → έξοδος, όπως και στο ρολόι
+            taps(scroll, onDouble = { onExit() })
             root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
             homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
             addAodButton()
@@ -360,6 +362,28 @@ class Dashboard(
             if (Build.VERSION.SDK_INT >= 29) v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
             else v.vibrate(VibrationEffect.createOneShot(20, VibrationEffect.DEFAULT_AMPLITUDE))
         } catch (_: Exception) {}
+    }
+
+    /**
+     * Πιάνει ταπ πάνω σε μια λίστα με κύλιση χωρίς να χαλάει την κύλιση: η ScrollView αλλιώς «τρώει»
+     * το πάτημα και δεν φτάνει ποτέ στη σελίδα/αρχική από πίσω. Πατήματα σε κουμπιά/κάρτες μέσα
+     * στη λίστα τα χειρίζονται αυτά πρώτα, οπότε εδώ φτάνουν μόνο τα πατήματα στο κενό.
+     */
+    private fun taps(v: View, onSingle: (() -> Unit)? = null, onDouble: (() -> Unit)? = null) {
+        val g = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                if (onDouble == null) onSingle?.invoke()
+                return onSingle != null
+            }
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                if (onDouble != null) onSingle?.invoke()
+                return onSingle != null
+            }
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                onDouble?.invoke(); return onDouble != null
+            }
+        })
+        v.setOnTouchListener { _, e -> g.onTouchEvent(e); false }
     }
 
     private fun springBack(v: View) {
@@ -773,6 +797,7 @@ class Dashboard(
                 days.addView(c, LinearLayout.LayoutParams(-1, -2).apply { if (d > 0) topMargin = dp(8) })
             }
             calBody.addView(android.widget.ScrollView(ctx).apply {
+                taps(this, onSingle = { close() })   // ένα ταπ στη λίστα → επιστροφή
                 isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 addView(days)
@@ -1117,6 +1142,7 @@ class Dashboard(
                 })
             }
             body.addView(android.widget.ScrollView(ctx).apply {
+                taps(this, onSingle = { close() })   // ένα ταπ εκτός κάρτας → επιστροφή
                 isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 addView(list)
