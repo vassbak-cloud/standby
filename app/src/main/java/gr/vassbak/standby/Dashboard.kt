@@ -450,8 +450,8 @@ class Dashboard(
         while (cur !== homeLayer) {
             if (!cur.matrix.isIdentity) cur.matrix.mapPoints(pts)
             val parent = cur.parent as? View ?: break
-            pts[0] += cur.left - parent.scrollX
-            pts[1] += cur.top - parent.scrollY
+            pts[0] = pts[0] + (cur.left - parent.scrollX)
+            pts[1] = pts[1] + (cur.top - parent.scrollY)
             cur = parent
         }
         return android.graphics.PointF(pts[0], pts[1])
