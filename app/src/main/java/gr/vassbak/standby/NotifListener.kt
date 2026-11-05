@@ -15,7 +15,8 @@ class NotifListener : NotificationListenerService() {
         val app: String, val title: String, val text: String, val time: Long, val key: String,
         val full: String,            // όλο το περιεχόμενο (μεγάλο κείμενο, μηνύματα συνομιλίας κ.λπ.)
         val open: PendingIntent?,    // ανοίγει την ειδοποίηση στην εφαρμογή της
-        val kind: Kind = Kind.OTHER  // κατηγορία, για το χρώμα της κάρτας
+        val kind: Kind = Kind.OTHER, // κατηγορία, για το χρώμα της κάρτας
+        val pkg: String = 
     )
     data class Nav(
         val distance: String, val instruction: String, val eta: String, val arrow: Drawable?,
@@ -61,6 +62,11 @@ class NotifListener : NotificationListenerService() {
         /** Διαγράφει μία ειδοποίηση (όπως το swipe στη γραμμή ειδοποιήσεων). */
         fun dismiss(key: String) {
             try { instance?.cancelNotification(key) } catch (_: Exception) {}
+        }
+
+        /** Εκκαθάριση όλων όσων φαίνονται στο StandBy. */
+        fun dismissAll(keys: List<String>) {
+            try { instance?.cancelNotifications(keys.toTypedArray()) } catch (_: Exception) {}
         }
 
         /** Όλο το κείμενο: συνομιλία, γραμμές inbox ή μεγάλο κείμενο, ό,τι υπάρχει. */
@@ -127,9 +133,10 @@ class NotifListener : NotificationListenerService() {
                         pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString()
                     } catch (_: Exception) { sbn.packageName }
                     Item(app, title, text, sbn.postTime, sbn.key, fullText(ex, text), sbn.notification.contentIntent,
-                        kindOf(sbn.notification, sbn.packageName))
+                        kindOf(sbn.notification, sbn.packageName), sbn.packageName)
                 }
-                .sortedByDescending { it.time }
+                // Τα μηνύματα πάντα πρώτα, μετά όλα τα άλλα· μέσα σε κάθε ομάδα τα νεότερα πρώτα
+                .sortedWith(compareBy<Item> { it.kind != Kind.MESSAGE }.thenByDescending { it.time })
                 .take(12)
                 .toList()
         }

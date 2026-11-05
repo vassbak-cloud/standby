@@ -1066,6 +1066,37 @@ class Dashboard(
             tv("${all.size}", 30f, white, light = true).apply { includeFontPadding = false },
             tv(all.first().app, 12f, cNotif).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
 
+        // Κουμπί «Εκκαθάριση όλων»: πρώτο πάτημα ζητά επιβεβαίωση, δεύτερο μέσα σε 3″ τα σβήνει
+        val clearBtn = tv("✕  Εκκαθάριση όλων", 14f, white).apply {
+            setPadding(dp(16), dp(7), dp(16), dp(7))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(18).toFloat()
+                setColor(withAlpha(cNotif, 0x30)); setStroke(dp(1), withAlpha(cNotif, 0x90))
+            }
+            isClickable = true
+            var armed = false
+            setOnClickListener { v ->
+                buzz()
+                if (!armed) {
+                    armed = true
+                    text = "Σίγουρα; Πάτα ξανά"
+                    (background as GradientDrawable).setColor(withAlpha(Color.parseColor("#FF453A"), 0x60))
+                    handler.postDelayed({
+                        armed = false
+                        text = "✕  Εκκαθάριση όλων"
+                        (background as GradientDrawable).setColor(withAlpha(cNotif, 0x30))
+                    }, 3000)
+                } else {
+                    NotifListener.dismissAll(all.map { it.key })
+                    v.animate().alpha(0f).setDuration(200).start()
+                    handler.postDelayed({ loadNotifications() }, 300)
+                }
+            }
+        }
+        body.addView(clearBtn, LinearLayout.LayoutParams(-2, -2).apply {
+            gravity = Gravity.END; bottomMargin = dp(8)
+        })
+
         if (portrait) {
             // Κάθετη: μία φαρδιά κάρτα ανά σειρά, με περισσότερο κείμενο, σε λίστα με κύλιση
             val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -1089,7 +1120,7 @@ class Dashboard(
                 isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 addView(list)
-            }, LinearLayout.LayoutParams(-1, -1))
+            }, LinearLayout.LayoutParams(-1, 0, 1f))
             return
         }
 
@@ -1383,10 +1414,9 @@ class Dashboard(
         btns.addView(pill("Διαγραφή", Color.parseColor("#FF453A"), false) {
             NotifListener.dismiss(n.key); dismissPopup(); handler.postDelayed({ loadNotifications() }, 200)
         })
-        if (n.open != null) btns.addView(pill("Άνοιγμα", kindColor(n.kind), false) {
-            try { n.open.send() } catch (_: Exception) {}
+        if (n.open != null || n.pkg.isNotEmpty()) btns.addView(pill("Άνοιγμα", kindColor(n.kind), false) {
             dismissPopup()
-            onExit()   // κλείνει το StandBy ώστε να φανεί η εφαρμογή (μπορεί να ζητήσει ξεκλείδωμα)
+            openNotifApp(n)   // κλείνει το StandBy ώστε να φανεί η εφαρμογή (μπορεί να ζητήσει ξεκλείδωμα)
         }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
         btns.addView(pill("Κλείσιμο", grey, true) { dismissPopup() },
             LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
@@ -1426,6 +1456,43 @@ class Dashboard(
         val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         outer.addView(body, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(4) })
         return outer to body
+    }
+
+    /**
+     * Ανοίγει την εφαρμογή της ειδοποίησης. Ξεκλειδώνει πρώτα αν χρειάζεται και επιτρέπει ρητά
+     * το άνοιγμα από το παρασκήνιο (Android 14+), αλλιώς το σύστημα το μπλοκάρει σιωπηλά.
+     * Αν η ειδοποίηση δεν έχει δικό της intent, ανοίγει απλώς την εφαρμογή.
+     */
+    private fun openNotifApp(n: NotifListener.Item) {
+        val go = {
+            var ok = false
+            n.open?.let { pi ->
+                try {
+                    if (Build.VERSION.SDK_INT >= 34) {
+                        val opts = android.app.ActivityOptions.makeBasic()
+                            .setPendingIntentBackgroundActivityStartMode(
+                                android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                        pi.send(ctx, 0, null, null, null, null, opts.toBundle())
+                    } else pi.send()
+                    ok = true
+                } catch (_: Exception) {}
+            }
+            if (!ok && n.pkg.isNotEmpty()) {
+                try {
+                    ctx.packageManager.getLaunchIntentForPackage(n.pkg)?.let {
+                        ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
+                } catch (_: Exception) {}
+            }
+            onExit()   // κλείνει το StandBy ώστε να φανεί η εφαρμογή
+        }
+        val act = ctx as? android.app.Activity
+        val km = ctx.getSystemService(android.app.KeyguardManager::class.java)
+        if (act != null && km != null && km.isKeyguardLocked) {
+            km.requestDismissKeyguard(act, object : android.app.KeyguardManager.KeyguardDismissCallback() {
+                override fun onDismissSucceeded() { go() }
+            })
+        } else go()
     }
 
     /** Χρώμα κάρτας ειδοποίησης ανάλογα με την κατηγορία. */
