@@ -367,8 +367,10 @@ class Dashboard(
 
     /** Θέση και κλίμακα του πλακιδίου ως προς όλη την οθόνη. */
     private fun tileGeometry(t: View): Geo {
-        val a = IntArray(2); val b = IntArray(2)
-        t.getLocationInWindow(a); detailLayer.getLocationInWindow(b)
+        // Θέση σε τοπικές συντεταγμένες (σωστή και όταν όλη η οθόνη είναι περιστραμμένη)
+        val r = android.graphics.Rect(0, 0, t.width, t.height)
+        view.offsetDescendantRectToMyCoords(t, r)
+        val a = intArrayOf(r.left, r.top); val b = intArrayOf(detailLayer.left, detailLayer.top)
         val w = (if (detailLayer.width > 0) detailLayer.width else view.width).coerceAtLeast(1).toFloat()
         val h = (if (detailLayer.height > 0) detailLayer.height else view.height).coerceAtLeast(1).toFloat()
         // Η αρχική μπορεί να είναι σε σμίκρυνση· διορθώνουμε με την τρέχουσα κλίμακά της
@@ -1167,18 +1169,20 @@ class Dashboard(
         var dragging = false
         var tracker: android.view.VelocityTracker? = null
         val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
-        card.setOnTouchListener { v, e ->
+        card.setOnTouchListener { v, ev ->
+            // Συντεταγμένες ως προς τον γονέα: δουλεύουν και όταν η οθόνη είναι περιστραμμένη
+            val e = MotionEvent.obtain(ev).apply { setLocation(ev.x + v.translationX, ev.y + v.translationY) }
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY; dragging = false
+                    downX = e.x; downY = e.y; dragging = false
                     tracker?.recycle(); tracker = android.view.VelocityTracker.obtain()
                     tracker?.addMovement(e)
                     v.animate().cancel()
                 }
                 MotionEvent.ACTION_MOVE -> {
                     tracker?.addMovement(e)
-                    val dx = e.rawX - downX
-                    if (!dragging && kotlin.math.abs(dx) > slop && kotlin.math.abs(dx) > kotlin.math.abs(e.rawY - downY)) {
+                    val dx = e.x - downX
+                    if (!dragging && kotlin.math.abs(dx) > slop && kotlin.math.abs(dx) > kotlin.math.abs(e.y - downY)) {
                         dragging = true
                         v.parent?.requestDisallowInterceptTouchEvent(true)
                     }
@@ -1206,11 +1210,12 @@ class Dashboard(
                         v.animate().translationX(0f).rotation(0f).alpha(1f).setDuration(550)
                             .setInterpolator(SpringInterpolator(7f, 15f)).start()
                         if (!dragging && e.actionMasked == MotionEvent.ACTION_UP &&
-                            kotlin.math.abs(e.rawX - downX) < slop && kotlin.math.abs(e.rawY - downY) < slop) onTap()
+                            kotlin.math.abs(e.x - downX) < slop && kotlin.math.abs(e.y - downY) < slop) onTap()
                     }
                     dragging = false
                 }
             }
+            e.recycle()
             true   // κρατάμε το άγγιγμα ώστε να μην κλείσει η σελίδα
         }
     }

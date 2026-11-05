@@ -172,7 +172,6 @@ class MainActivity : Activity() {
         val options = listOf(
             90 to "Οριζόντια — φορτιστής δεξιά",
             270 to "Οριζόντια — φορτιστής αριστερά",
-            0 to "Ακολουθεί την περιστροφή του κινητού"
         )
         for ((value, label) in options) {
             group.addView(RadioButton(this).apply {

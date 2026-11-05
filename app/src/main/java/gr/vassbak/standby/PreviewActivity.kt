@@ -23,7 +23,11 @@ class PreviewActivity : Activity() {
         dashboard = Dashboard(this, onExit = { finish() }, onNightChanged = { night ->
             window.attributes = window.attributes.apply { screenBrightness = if (night) 0.05f else -1f }
         })
-        setContentView(dashboard.view)
+        // Όταν το κινητό είναι όρθιο (π.χ. πάνω από την οθόνη κλειδώματος), περιστρέφουμε το περιεχόμενο
+        // ώστε τα πλακίδια να φαίνονται πάντα οριζόντια
+        val wrapper = RotatedLayout(this, Prefs.rotation(this).let { if (it == 0) 90 else it })
+        wrapper.addView(dashboard.view)
+        setContentView(wrapper)
         hideBars()
     }
 
