@@ -238,24 +238,16 @@ class Dashboard(
         root.addView(left, if (portrait) LinearLayout.LayoutParams(-1, dp(200)) else LinearLayout.LayoutParams(0, -1, 1.15f))
 
         if (portrait) {
-            // Κάθετη: ένα φαρδύ πλακίδιο ανά σειρά, με κύλιση αν δεν χωράνε
+            // Κάθετη: δύο πλακίδια ανά σειρά, πιο φαρδιά απ' ό,τι ψηλά, με κύλιση αν δεν χωράνε
             val list = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(0, 0, 0, dp(56))   // χώρος για το κουμπάκι Always On
             }
-            val order = listOf(
-                Triple(Section.WEATHER, cWeather, "ΚΑΙΡΟΣ") to 150,
-                Triple(Section.BATTERY, cBattery, "ΜΠΑΤΑΡΙΑ") to 120,
-                Triple(Section.COROS, cCoros, "COROS ΣΗΜΕΡΑ") to 140,
-                Triple(Section.MUSIC, cMusic, "ΜΟΥΣΙΚΗ") to 140,
-                Triple(Section.CAL, cCal, "ΕΠΟΜΕΝΑ") to 180,
-                Triple(Section.NOTIF, cNotif, "ΕΙΔΟΠΟΙΗΣΕΙΣ") to 180,
-            )
-            order.forEachIndexed { i, (t, h) ->
-                list.addView(tile(t.first, t.second, t.third), LinearLayout.LayoutParams(-1, dp(h)).apply {
-                    if (i > 0) topMargin = dp(10)
-                })
-            }
+            list.addView(tileRow(Section.WEATHER to 1f, Section.BATTERY to 1f), LinearLayout.LayoutParams(-1, dp(118)))
+            list.addView(tileRow(Section.COROS to 1f, Section.MUSIC to 1f),
+                LinearLayout.LayoutParams(-1, dp(118)).apply { topMargin = dp(8) })
+            list.addView(tileRow(Section.CAL to 1f, Section.NOTIF to 1f),
+                LinearLayout.LayoutParams(-1, dp(118)).apply { topMargin = dp(8) })
             val scroll = android.widget.ScrollView(ctx).apply {
                 isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
@@ -766,24 +758,27 @@ class Dashboard(
         // Πλήρης οθόνη: πλέγμα 4 + 3 ημερών
         calBody.removeAllViews()
         val byDay = list.groupBy { dayOffset(it) }
-        for (r in 0..1) {
+        val perRow = if (portrait) 2 else 4
+        val maxEv = if (portrait) 2 else 3
+        for (r in 0..6 / perRow) {
             val rowView = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            val range = if (r == 0) 0..3 else 4..6
+            val range = (r * perRow) until minOf(7, (r + 1) * perRow)
             for (d in range) {
                 val (c, body) = card(if (d == 0) cCal else Color.parseColor("#8E6BB0"), dayName(d).uppercase(el))
                 val evs = byDay[d].orEmpty()
                 if (evs.isEmpty()) body.addView(tv("—", 14f, dim))
-                for (e in evs.take(3)) {
+                for (e in evs.take(maxEv)) {
                     val t = if (e.allDay) "Ολοήμ." else timeFmt.format(Date(e.begin))
                     body.addView(eventLine(t, e.title, e.color, 14f))
                 }
-                if (evs.size > 3) body.addView(tv("+${evs.size - 3} ακόμα", 12f, grey))
+                if (evs.size > maxEv) body.addView(tv("+${evs.size - maxEv} ακόμα", 12f, grey))
                 rowView.addView(c, LinearLayout.LayoutParams(0, -1, 1f).apply {
                     if (d != range.first) marginStart = dp(8)
                 })
             }
-            if (r == 1) rowView.addView(View(ctx), LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(8) })
-            calBody.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
+            if (range.count() < perRow) rowView.addView(View(ctx), LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(8) })
+            calBody.addView(rowView, (if (portrait) LinearLayout.LayoutParams(-1, dp(118))
+                else LinearLayout.LayoutParams(-1, 0, 1f)).apply { if (r > 0) topMargin = dp(8) })
         }
     }
 
@@ -844,7 +839,9 @@ class Dashboard(
         if (main != null && main.minutes > 0) tileLine.addView(tv("  ${main.minutes}′", 15f, cCoros))
         setBody(tileBody, tileLine)
 
-        val cols = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val cols = LinearLayout(ctx).apply {
+            orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        }
 
         val (todayCard, tBody) = card(cCoros, "ΣΗΜΕΡΑ")
         tBody.gravity = Gravity.CENTER_VERTICAL
@@ -861,7 +858,7 @@ class Dashboard(
                 if (w.completed) append(" · ✓ Ολοκληρώθηκε")
             }, 17f, if (w.completed) cBattery else cCoros))
         }
-        cols.addView(todayCard, LinearLayout.LayoutParams(0, -1, 1.1f))
+        cols.addView(todayCard, if (portrait) LinearLayout.LayoutParams(-1, dp(190)) else LinearLayout.LayoutParams(0, -1, 1.1f))
 
         val (nextCard, nBody) = card(cCoros, "ΕΠΟΜΕΝΕΣ ΜΕΡΕΣ")
         if (next.isEmpty()) nBody.addView(tv("Τίποτα προγραμματισμένο", 15f, grey))
@@ -872,14 +869,15 @@ class Dashboard(
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(3), 0, dp(3))
             }
-            line.addView(tv(label, 15f, cCoros), LinearLayout.LayoutParams(dp(100), -2))
+            line.addView(tv(label, 15f, cCoros), LinearLayout.LayoutParams(dp(if (portrait) 80 else 100), -2))
             line.addView(tv("${Coros.sportLabel(w.sport).first} ${w.name}" +
                 (if (w.minutes > 0) " · ${w.minutes}′" else ""), 16f, soft).apply {
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(0, -2, 1f))
             nBody.addView(line)
         }
-        cols.addView(nextCard, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(10) })
+        cols.addView(nextCard, if (portrait) LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) }
+            else LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(10) })
         body.addView(cols, LinearLayout.LayoutParams(-1, -1))
     }
 
@@ -913,14 +911,16 @@ class Dashboard(
 
         val body = bodies.getValue(Section.WEATHER)
         body.removeAllViews()
-        val top = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val top = LinearLayout(ctx).apply {
+            orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        }
 
         val (nowCard, nowBody) = card(cWeather, "ΤΩΡΑ")
         nowBody.gravity = Gravity.CENTER_VERTICAL
         nowBody.addView(tv(now, 44f, white, light = true))
         nowBody.addView(tv(desc, 16f, soft))
         if (today != null) nowBody.addView(tv("$range · 💧${today.rain}%", 15f, cWeather))
-        top.addView(nowCard, LinearLayout.LayoutParams(0, -1, 1f))
+        top.addView(nowCard, if (portrait) LinearLayout.LayoutParams(-1, dp(150)) else LinearLayout.LayoutParams(0, -1, 1f))
 
         val (daysCard, daysBody) = card(cWeather, "ΕΠΟΜΕΝΕΣ ΜΕΡΕΣ")
         val dayFmt = SimpleDateFormat("EEE", el)
@@ -929,15 +929,17 @@ class Dashboard(
                 "${Weather.text(d.code).first}\n${d.max}°/${d.min}°",
                 if (d.rain >= 20) "💧${d.rain}%" else " ")
         }), LinearLayout.LayoutParams(-1, -1))
-        top.addView(daysCard, LinearLayout.LayoutParams(0, -1, 2f).apply { marginStart = dp(8) })
-        body.addView(top, LinearLayout.LayoutParams(-1, 0, 1f))
+        top.addView(daysCard, if (portrait) LinearLayout.LayoutParams(-1, dp(170)).apply { topMargin = dp(8) }
+            else LinearLayout.LayoutParams(0, -1, 2f).apply { marginStart = dp(8) })
+        body.addView(top, if (portrait) LinearLayout.LayoutParams(-1, -2) else LinearLayout.LayoutParams(-1, 0, 1f))
 
         val (hCard, hBody) = card(cWeather, "ΕΠΟΜΕΝΕΣ ΩΡΕΣ")
-        hBody.addView(columns(w.hours.filterIndexed { i, _ -> i % 2 == 0 }.take(8).map { h ->
+        hBody.addView(columns(w.hours.filterIndexed { i, _ -> i % 2 == 0 }.take(if (portrait) 6 else 8).map { h ->
             Triple(timeFmt.format(Date(h.time)), "${Weather.text(h.code).first}\n${h.temp}°",
                 if (h.rain >= 20) "💧${h.rain}%" else " ")
         }), LinearLayout.LayoutParams(-1, -1))
-        body.addView(hCard, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
+        body.addView(hCard, (if (portrait) LinearLayout.LayoutParams(-1, dp(170)) else LinearLayout.LayoutParams(-1, 0, 1f))
+            .apply { topMargin = dp(8) })
     }
 
     private fun columns(items: List<Triple<String, String, String>>): LinearLayout {
@@ -1044,10 +1046,12 @@ class Dashboard(
             tv(all.first().app, 12f, cNotif).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
 
         val items = all.take(6)
-        for (r in 0..1) {
+        val nRows = if (portrait) 3 else 2
+        val nCols = if (portrait) 2 else 3
+        for (r in 0 until nRows) {
             val rowView = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            for (c in 0..2) {
-                val n = items.getOrNull(r * 3 + c)
+            for (c in 0 until nCols) {
+                val n = items.getOrNull(r * nCols + c)
                 val lpCard = LinearLayout.LayoutParams(0, -1, 1f).apply { if (c > 0) marginStart = dp(8) }
                 if (n == null) { rowView.addView(View(ctx), lpCard); continue }
                 val (cardView, cb) = card(cNotif, "${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el))
@@ -1055,12 +1059,13 @@ class Dashboard(
                     maxLines = 1; ellipsize = TextUtils.TruncateAt.END
                 })
                 if (n.text.isNotBlank()) cb.addView(tv(n.text, 14f, grey).apply {
-                    maxLines = 3; ellipsize = TextUtils.TruncateAt.END
+                    maxLines = if (portrait) 2 else 3; ellipsize = TextUtils.TruncateAt.END
                 })
                 swipeToDismiss(cardView, n.key) { showNotifDetail(n) }
                 rowView.addView(cardView, lpCard)
             }
-            body.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
+            body.addView(rowView, (if (portrait) LinearLayout.LayoutParams(-1, dp(120))
+                else LinearLayout.LayoutParams(-1, 0, 1f)).apply { if (r > 0) topMargin = dp(8) })
         }
     }
 
