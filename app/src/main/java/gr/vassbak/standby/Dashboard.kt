@@ -214,7 +214,7 @@ class Dashboard(
         // Οριζόντια: ρολόι αριστερά, πλακίδια δεξιά. Κάθετη: ρολόι πάνω, πλακίδια κάτω.
         val root = LinearLayout(ctx).apply {
             orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
-            if (portrait) setPadding(dp(16), dp(28), dp(16), dp(48))
+            if (portrait) setPadding(dp(16), dp(24), dp(16), 0)
             else setPadding(dp(28), dp(16), dp(28), dp(16))
         }
 
@@ -235,7 +235,38 @@ class Dashboard(
         left.addView(navTile, FrameLayout.LayoutParams(-1, -1).apply {
             if (portrait) bottomMargin = dp(10) else marginEnd = dp(10)
         })
-        root.addView(left, if (portrait) LinearLayout.LayoutParams(-1, 0, 0.6f) else LinearLayout.LayoutParams(0, -1, 1.15f))
+        root.addView(left, if (portrait) LinearLayout.LayoutParams(-1, dp(200)) else LinearLayout.LayoutParams(0, -1, 1.15f))
+
+        if (portrait) {
+            // Κάθετη: ένα φαρδύ πλακίδιο ανά σειρά, με κύλιση αν δεν χωράνε
+            val list = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 0, 0, dp(56))   // χώρος για το κουμπάκι Always On
+            }
+            val order = listOf(
+                Triple(Section.WEATHER, cWeather, "ΚΑΙΡΟΣ") to 150,
+                Triple(Section.BATTERY, cBattery, "ΜΠΑΤΑΡΙΑ") to 120,
+                Triple(Section.COROS, cCoros, "COROS ΣΗΜΕΡΑ") to 140,
+                Triple(Section.MUSIC, cMusic, "ΜΟΥΣΙΚΗ") to 140,
+                Triple(Section.CAL, cCal, "ΕΠΟΜΕΝΑ") to 180,
+                Triple(Section.NOTIF, cNotif, "ΕΙΔΟΠΟΙΗΣΕΙΣ") to 180,
+            )
+            order.forEachIndexed { i, (t, h) ->
+                list.addView(tile(t.first, t.second, t.third), LinearLayout.LayoutParams(-1, dp(h)).apply {
+                    if (i > 0) topMargin = dp(10)
+                })
+            }
+            val scroll = android.widget.ScrollView(ctx).apply {
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
+                addView(list)
+            }
+            root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
+            homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
+            addAodButton()
+            return
+        }
 
         // Δεξιά: πλέγμα πλακιδίων
         val right = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
@@ -244,9 +275,13 @@ class Dashboard(
             LinearLayout.LayoutParams(-1, 0, 0.95f).apply { topMargin = dp(8) })
         right.addView(tileRow(Section.CAL to 1.4f, Section.NOTIF to 1f),
             LinearLayout.LayoutParams(-1, 0, 1.25f).apply { topMargin = dp(8) })
-        root.addView(right, if (portrait) LinearLayout.LayoutParams(-1, 0, 1.4f) else LinearLayout.LayoutParams(0, -1, 1f))
+        root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
 
         homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
+        addAodButton()
+    }
+
+    private fun addAodButton() {
 
         // Κουμπάκι Always On (φαίνεται μόνο εκτός φόρτισης): πράσινο = δεν κλείνει, γκρι = κλείνει σε 1′
         aodPill = View(ctx).apply {
