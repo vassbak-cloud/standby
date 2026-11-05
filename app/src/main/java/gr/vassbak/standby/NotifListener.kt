@@ -16,7 +16,7 @@ class NotifListener : NotificationListenerService() {
         val full: String,            // όλο το περιεχόμενο (μεγάλο κείμενο, μηνύματα συνομιλίας κ.λπ.)
         val open: PendingIntent?,    // ανοίγει την ειδοποίηση στην εφαρμογή της
         val kind: Kind = Kind.OTHER, // κατηγορία, για το χρώμα της κάρτας
-        val pkg: String = 
+        val pkg: String = ""          // πακέτο της εφαρμογής (για άνοιγμα αν λείπει το intent)
     )
     data class Nav(
         val distance: String, val instruction: String, val eta: String, val arrow: Drawable?,
