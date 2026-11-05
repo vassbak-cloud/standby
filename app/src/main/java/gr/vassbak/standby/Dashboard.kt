@@ -116,6 +116,7 @@ class Dashboard(
 
     private var pullTarget: View? = null
     private var pullBaseY = 0f
+    private var pullStep = 0   // πόσα «σκαλοπάτια» δόνησης έχουν περάσει στο τρέχον τράβηγμα
 
     /** Υπάρχει κάτι κάτω από το δάχτυλο που μπορεί ακόμα να κυλήσει προς τα πάνω; */
     private fun scrollsUpAt(v: View, rx: Float, ry: Float): Boolean {
@@ -131,6 +132,8 @@ class Dashboard(
         val t = openSection?.let { pages[it] } ?: homeLayer
         t.animate().cancel()
         pullTarget = t
+        pullStep = 0
+        buzz(Haptic.TICK)   // «έπιασε» το λάστιχο
         pullBaseY = if (t === homeLayer) homeLayer.translationY else 0f
         t.pivotX = t.width / 2f
         t.pivotY = 0f
@@ -144,11 +147,15 @@ class Dashboard(
         t.translationY = pullBaseY + d * 0.45f
         t.scaleY = 1f + d / h * 0.35f     // τεντώνει προς τα κάτω
         t.scaleX = 1f - d / h * 0.06f     // και λεπταίνει λίγο
+        // Ελαφριά «τικ» σε κάθε 20% της διαδρομής: νιώθεις το λάστιχο να τεντώνει
+        val step = (d / max * 5f).toInt()
+        if (step > pullStep) { pullStep = step; buzz(Haptic.TICK) }
     }
 
     private fun pullRelease() {
         val t = pullTarget ?: return
         pullTarget = null
+        if (pullStep > 0) buzz(Haptic.HEAVY)   // «χτύπημα» του ελατηρίου που επιστρέφει
         t.animate().translationY(pullBaseY).scaleX(1f).scaleY(1f)
             .setDuration(750).setInterpolator(SpringInterpolator(5.5f, 15f)).setListener(null)
             .withEndAction { t.pivotY = t.height / 2f }   // τα άλλα εφέ (άνοιγμα/κλείσιμο) θέλουν κέντρο
@@ -444,12 +451,21 @@ class Dashboard(
         else @Suppress("DEPRECATION") (ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
     }
 
-    private fun buzz() {
+    /** Ένταση δόνησης: TICK = πολύ ελαφρύ «τικ», CLICK = κλικ κουμπιού, HEAVY = πιο γεμάτο «τοκ». */
+    private enum class Haptic { TICK, CLICK, HEAVY }
+
+    private fun buzz(kind: Haptic = Haptic.CLICK) {
         val v = vibrator ?: return
         if (!v.hasVibrator()) return
         try {
-            if (Build.VERSION.SDK_INT >= 29) v.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK))
-            else v.vibrate(VibrationEffect.createOneShot(20, VibrationEffect.DEFAULT_AMPLITUDE))
+            if (Build.VERSION.SDK_INT >= 29) v.vibrate(VibrationEffect.createPredefined(when (kind) {
+                Haptic.TICK -> VibrationEffect.EFFECT_TICK
+                Haptic.CLICK -> VibrationEffect.EFFECT_CLICK
+                Haptic.HEAVY -> VibrationEffect.EFFECT_HEAVY_CLICK
+            }))
+            else v.vibrate(VibrationEffect.createOneShot(when (kind) {
+                Haptic.TICK -> 8L; Haptic.CLICK -> 20L; Haptic.HEAVY -> 35L
+            }, VibrationEffect.DEFAULT_AMPLITUDE))
         } catch (_: Exception) {}
     }
 
@@ -513,6 +529,7 @@ class Dashboard(
         val tileView = tiles[sec] ?: return
         val page = pages[sec] ?: return
         animating = true
+        buzz(Haptic.TICK)
         homeLayer.animate().cancel()
         homeLayer.scaleX = 1f; homeLayer.scaleY = 1f
         val (tx, ty, sx, sy) = tileGeometry(tileView)
@@ -1437,12 +1454,13 @@ class Dashboard(
         var downX = 0f
         var downY = 0f
         var dragging = false
+        var armed = false
         var tracker: android.view.VelocityTracker? = null
         val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
         card.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX = e.rawX; downY = e.rawY; dragging = false
+                    downX = e.rawX; downY = e.rawY; dragging = false; armed = false
                     tracker?.recycle(); tracker = android.view.VelocityTracker.obtain()
                     tracker?.addMovement(e)
                     v.animate().cancel()
@@ -1455,6 +1473,11 @@ class Dashboard(
                         v.parent?.requestDisallowInterceptTouchEvent(true)
                     }
                     if (dragging) {
+                        val past = kotlin.math.abs(dx) > v.width * 0.35f
+                        if (past != armed) {
+                            armed = past
+                            buzz(Haptic.TICK)   // πέρασες/γύρισες το όριο διαγραφής
+                        }
                         v.translationX = dx
                         v.rotation = dx / v.width.coerceAtLeast(1) * 8f
                         v.alpha = (1f - kotlin.math.abs(dx) / (v.width * 1.2f)).coerceIn(0.15f, 1f)
@@ -1470,6 +1493,7 @@ class Dashboard(
                     if (dragging && e.actionMasked == MotionEvent.ACTION_UP &&
                         (kotlin.math.abs(dx) > v.width * 0.35f || fling)) {
                         val dir = if (dx >= 0) 1 else -1
+                        buzz(Haptic.CLICK)
                         v.animate().translationX(dir * view.width.toFloat()).rotation(dir * 14f).alpha(0f)
                             .setDuration(220).setInterpolator(DecelerateInterpolator())
                             .withEndAction { NotifListener.dismiss(key); handler.postDelayed({ loadNotifications() }, 150) }
