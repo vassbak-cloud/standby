@@ -20,8 +20,13 @@ class PreviewActivity : Activity() {
         super.onCreate(savedInstanceState)
         setShowWhenLocked(true)
         setTurnScreenOn(true)
-        requestedOrientation = if (Prefs.portrait(this)) ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                               else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Αυτόματα: και τις 4 φορές (όρθιο, ανάποδα, πλάγια αριστερά/δεξιά), ακόμα κι αν είναι κλειδωμένη
+        // η περιστροφή. Σε κάθε γύρισμα η οθόνη ξαναστήνεται με την κατάλληλη διάταξη.
+        requestedOrientation = when {
+            Prefs.followsPhone(this) -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            Prefs.portrait(this) -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         dashboard = Dashboard(this, onExit = { finish() }, onNightChanged = { night ->
             window.attributes = window.attributes.apply { screenBrightness = if (night) 0.05f else -1f }

@@ -27,6 +27,11 @@ object Prefs {
 
     fun rotation(ctx: Context) = get(ctx).getInt(KEY_ROTATION, 90)
     fun portrait(ctx: Context) = rotation(ctx) == PORTRAIT
+    fun followsPhone(ctx: Context) = rotation(ctx) == 0
+
+    /** Κάθετη διάταξη; Στο «αυτόματα» κρίνεται από το πώς κρατάς το κινητό αυτή τη στιγμή. */
+    fun portraitNow(ctx: Context) = portrait(ctx) || (followsPhone(ctx) &&
+        ctx.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT)
     const val KEY_WAKE_CHARGING = "wake_charging"
     fun wakeOnCharging(ctx: Context) = get(ctx).getBoolean(KEY_WAKE_CHARGING, false)
     const val KEY_TILE_ORDER = "tile_order"  // σειρά πλακιδίων στην αρχική, π.χ. "WEATHER,BATTERY,…"

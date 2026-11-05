@@ -1,5 +1,6 @@
 package gr.vassbak.standby
 
+import android.content.res.Configuration
 import android.service.dreams.DreamService
 
 /** Η «προφύλαξη οθόνης» που ξεκινά μόνη της όταν το κινητό φορτίζει. */
@@ -13,6 +14,10 @@ class StandbyDream : DreamService() {
         isFullscreen = true
         isScreenBright = true
 
+        build()
+    }
+
+    private fun build() {
         val d = Dashboard(this, onExit = { finish() }, onNightChanged = { night -> isScreenBright = !night })
         val wrapper = RotatedLayout(this, Prefs.rotation(this))
         wrapper.addView(d.view)
@@ -20,7 +25,20 @@ class StandbyDream : DreamService() {
         dashboard = d
     }
 
+    private var lastOrientation = 0
+
+    /** Στο «αυτόματα»: όταν γυρίσει το κινητό, ξαναστήνεται με κάθετη ή οριζόντια διάταξη. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!Prefs.followsPhone(this) || newConfig.orientation == lastOrientation || dashboard == null) return
+        lastOrientation = newConfig.orientation
+        dashboard?.stop()
+        build()
+        dashboard?.start()
+    }
+
     override fun onDreamingStarted() {
+        lastOrientation = resources.configuration.orientation
         super.onDreamingStarted()
         dashboard?.start()
     }

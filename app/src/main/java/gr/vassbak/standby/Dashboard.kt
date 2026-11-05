@@ -215,7 +215,7 @@ class Dashboard(
     private var lastMinute = -1
     private var night: Boolean? = null
     private var lastTouch = System.currentTimeMillis()
-    private val portrait = Prefs.portrait(ctx)
+    private val portrait = Prefs.portraitNow(ctx)
 
     // Πλακίδια αρχικής: η σειρά τους αλλάζει με παρατεταμένο πάτημα και σύρσιμο, και αποθηκεύεται
     private val homeSecs = listOf(Section.WEATHER, Section.BATTERY, Section.COROS, Section.MUSIC, Section.CAL, Section.NOTIF)

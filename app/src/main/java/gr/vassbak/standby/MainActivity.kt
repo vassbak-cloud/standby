@@ -173,7 +173,7 @@ class MainActivity : Activity() {
             90 to "Οριζόντια — φορτιστής δεξιά",
             270 to "Οριζόντια — φορτιστής αριστερά",
             Prefs.PORTRAIT to "Κάθετη (όρθιο κινητό)",
-            0 to "Ακολουθεί την περιστροφή του κινητού"
+            0 to "Αυτόματα — όπως το κρατάς (όρθιο, πλάγιο, ανάποδα)"
         )
         for ((value, label) in options) {
             group.addView(RadioButton(this).apply {
