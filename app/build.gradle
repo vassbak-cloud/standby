@@ -12,7 +12,7 @@ android {
         minSdk 26
         targetSdk 34
         // Κάθε build στο GitHub παίρνει μεγαλύτερο αριθμό έκδοσης
-        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '13').toInteger() + 100
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '13').toInteger() + 100)
         versionName "2.3"
     }
 
