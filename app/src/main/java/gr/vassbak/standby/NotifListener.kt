@@ -14,7 +14,8 @@ class NotifListener : NotificationListenerService() {
     data class Item(
         val app: String, val title: String, val text: String, val time: Long, val key: String,
         val full: String,            // όλο το περιεχόμενο (μεγάλο κείμενο, μηνύματα συνομιλίας κ.λπ.)
-        val open: PendingIntent?     // ανοίγει την ειδοποίηση στην εφαρμογή της
+        val open: PendingIntent?,    // ανοίγει την ειδοποίηση στην εφαρμογή της
+        val kind: Kind = Kind.OTHER  // κατηγορία, για το χρώμα της κάρτας
     )
     data class Nav(
         val distance: String, val instruction: String, val eta: String, val arrow: Drawable?,
@@ -85,6 +86,30 @@ class NotifListener : NotificationListenerService() {
             return fallback
         }
 
+        /** Κατηγορία ειδοποίησης: από το category της, αλλιώς από το όνομα της εφαρμογής. */
+        private fun kindOf(n: Notification, pkg: String): Kind {
+            when (n.category) {
+                Notification.CATEGORY_MESSAGE -> return Kind.MESSAGE
+                Notification.CATEGORY_EMAIL -> return Kind.EMAIL
+                Notification.CATEGORY_CALL, Notification.CATEGORY_MISSED_CALL -> return Kind.CALL
+                Notification.CATEGORY_EVENT, Notification.CATEGORY_REMINDER, Notification.CATEGORY_ALARM -> return Kind.CALENDAR
+                Notification.CATEGORY_SOCIAL -> return Kind.SOCIAL
+                Notification.CATEGORY_PROMO, Notification.CATEGORY_RECOMMENDATION -> return Kind.PROMO
+                Notification.CATEGORY_SYSTEM, Notification.CATEGORY_STATUS, Notification.CATEGORY_ERROR,
+                Notification.CATEGORY_PROGRESS -> return Kind.SYSTEM
+            }
+            val p = pkg.lowercase()
+            return when {
+                listOf("whatsapp", "viber", "telegram", "messag", "mms", "sms", "signal", "orca").any { it in p } -> Kind.MESSAGE
+                p == "com.google.android.gm" || listOf("mail", "outlook").any { it in p } -> Kind.EMAIL
+                listOf("dialer", "phone", "telecom").any { it in p } -> Kind.CALL
+                listOf("calendar", "clock", "alarm").any { it in p } -> Kind.CALENDAR
+                listOf("instagram", "facebook", "katana", "twitter", "tiktok", "snapchat", "linkedin", "strava").any { it in p } -> Kind.SOCIAL
+                listOf("android", "settings", "systemui").any { p.startsWith("com.$it") || p.startsWith(it) } -> Kind.SYSTEM
+                else -> Kind.OTHER
+            }
+        }
+
         fun current(ctx: Context): List<Item> {
             val svc = instance ?: return emptyList()
             val list = try { svc.activeNotifications ?: emptyArray() } catch (_: Exception) { emptyArray<StatusBarNotification>() }
@@ -101,7 +126,8 @@ class NotifListener : NotificationListenerService() {
                     val app = try {
                         pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString()
                     } catch (_: Exception) { sbn.packageName }
-                    Item(app, title, text, sbn.postTime, sbn.key, fullText(ex, text), sbn.notification.contentIntent)
+                    Item(app, title, text, sbn.postTime, sbn.key, fullText(ex, text), sbn.notification.contentIntent,
+                        kindOf(sbn.notification, sbn.packageName))
                 }
                 .sortedByDescending { it.time }
                 .take(12)
@@ -114,3 +140,6 @@ class NotifListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) { onChange?.invoke() }
     override fun onNotificationRemoved(sbn: StatusBarNotification?) { onChange?.invoke() }
 }
+
+/** Κατηγορίες ειδοποιήσεων, η καθεμία με δικό της χρώμα. */
+enum class Kind { MESSAGE, EMAIL, CALL, CALENDAR, SOCIAL, PROMO, SYSTEM, OTHER }

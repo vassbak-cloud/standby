@@ -1045,6 +1045,33 @@ class Dashboard(
             tv("${all.size}", 30f, white, light = true).apply { includeFontPadding = false },
             tv(all.first().app, 12f, cNotif).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
 
+        if (portrait) {
+            // Κάθετη: μία φαρδιά κάρτα ανά σειρά, με περισσότερο κείμενο, σε λίστα με κύλιση
+            val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            all.forEachIndexed { i, n ->
+                val color = kindColor(n.kind)
+                val (cardView, cb) = card(color, "${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el))
+                if (n.title.isNotBlank()) cb.addView(tv(n.title, 17f, white).apply {
+                    maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                })
+                val txt = n.full.ifBlank { n.text }
+                if (txt.isNotBlank()) cb.addView(tv(txt, 15f, soft).apply {
+                    maxLines = 5; ellipsize = TextUtils.TruncateAt.END
+                    setLineSpacing(0f, 1.1f)
+                })
+                swipeToDismiss(cardView, n.key) { showNotifDetail(n) }
+                list.addView(cardView, LinearLayout.LayoutParams(-1, -2).apply {
+                    if (i > 0) topMargin = dp(8)
+                })
+            }
+            body.addView(android.widget.ScrollView(ctx).apply {
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(list)
+            }, LinearLayout.LayoutParams(-1, -1))
+            return
+        }
+
         val items = all.take(6)
         val nRows = if (portrait) 3 else 2
         val nCols = if (portrait) 2 else 3
@@ -1054,7 +1081,7 @@ class Dashboard(
                 val n = items.getOrNull(r * nCols + c)
                 val lpCard = LinearLayout.LayoutParams(0, -1, 1f).apply { if (c > 0) marginStart = dp(8) }
                 if (n == null) { rowView.addView(View(ctx), lpCard); continue }
-                val (cardView, cb) = card(cNotif, "${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el))
+                val (cardView, cb) = card(kindColor(n.kind), "${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el))
                 if (n.title.isNotBlank()) cb.addView(tv(n.title, 16f, white).apply {
                     maxLines = 1; ellipsize = TextUtils.TruncateAt.END
                 })
@@ -1296,11 +1323,11 @@ class Dashboard(
             background = GradientDrawable().apply {
                 cornerRadius = dp(26).toFloat()
                 setColor(Color.parseColor("#1C1C1E"))
-                setStroke(dp(2), withAlpha(cNotif, 0xAA))
+                setStroke(dp(2), withAlpha(kindColor(n.kind), 0xAA))
             }
             isClickable = true   // πάτημα μέσα στο παράθυρο δεν το κλείνει
         }
-        box.addView(tv("${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el), 12f, cNotif).apply {
+        box.addView(tv("${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el), 12f, kindColor(n.kind)).apply {
             letterSpacing = 0.12f
         })
         if (n.title.isNotBlank()) box.addView(tv(n.title, 22f, white).apply { setPadding(0, dp(4), 0, dp(6)) })
@@ -1326,7 +1353,7 @@ class Dashboard(
         btns.addView(pill("Διαγραφή", Color.parseColor("#FF453A"), false) {
             NotifListener.dismiss(n.key); dismissPopup(); handler.postDelayed({ loadNotifications() }, 200)
         })
-        if (n.open != null) btns.addView(pill("Άνοιγμα", cNotif, false) {
+        if (n.open != null) btns.addView(pill("Άνοιγμα", kindColor(n.kind), false) {
             try { n.open.send() } catch (_: Exception) {}
             dismissPopup()
             onExit()   // κλείνει το StandBy ώστε να φανεί η εφαρμογή (μπορεί να ζητήσει ξεκλείδωμα)
@@ -1369,6 +1396,18 @@ class Dashboard(
         val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         outer.addView(body, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(4) })
         return outer to body
+    }
+
+    /** Χρώμα κάρτας ειδοποίησης ανάλογα με την κατηγορία. */
+    private fun kindColor(k: Kind) = when (k) {
+        Kind.MESSAGE -> Color.parseColor("#30D158")   // πράσινο
+        Kind.EMAIL -> Color.parseColor("#0A84FF")     // μπλε
+        Kind.CALL -> Color.parseColor("#FF453A")      // κόκκινο
+        Kind.CALENDAR -> Color.parseColor("#BF5AF2")  // μωβ
+        Kind.SOCIAL -> Color.parseColor("#FF9F0A")    // πορτοκαλί
+        Kind.PROMO -> Color.parseColor("#8E8E93")     // γκρι
+        Kind.SYSTEM -> Color.parseColor("#64D2FF")    // γαλάζιο
+        Kind.OTHER -> cNotif
     }
 
     private fun withAlpha(color: Int, a: Int) = Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
