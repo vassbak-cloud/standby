@@ -65,11 +65,95 @@ class Dashboard(
     private enum class Section { NAV, WEATHER, BATTERY, COROS, MUSIC, CAL, NOTIF }
 
     val view: FrameLayout = object : FrameLayout(ctx) {
+        private var startX = 0f
+        private var startY = 0f
+        private var pulling = false
+        private var blocked = false
+        private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) lastTouch = System.currentTimeMillis()
             return super.dispatchTouchEvent(ev)
         }
+
+        // Τράβηγμα προς τα κάτω οπουδήποτε: «παίρνουμε» την κίνηση μόνο όταν είναι καθαρά προς τα κάτω
+        // και η λίστα κάτω από το δάχτυλο (αν υπάρχει) είναι ήδη στην κορυφή της.
+        override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = ev.rawX; startY = ev.rawY; pulling = false
+                    blocked = animating || childCount > 2 || scrollsUpAt(this, ev.rawX, ev.rawY)
+                }
+                MotionEvent.ACTION_MOVE -> if (!blocked && !pulling) {
+                    val dy = ev.rawY - startY
+                    if (dy > slop && dy > kotlin.math.abs(ev.rawX - startX) * 1.2f) {
+                        pulling = true
+                        startY = ev.rawY      // η παραμόρφωση ξεκινά ομαλά από το μηδέν
+                        pullBegin()
+                    }
+                }
+            }
+            return pulling
+        }
+
+        override fun onTouchEvent(ev: MotionEvent): Boolean {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { startX = ev.rawX; startY = ev.rawY; pulling = false; blocked = animating }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!pulling && !blocked && ev.rawY - startY > slop) { pulling = true; startY = ev.rawY; pullBegin() }
+                    if (pulling) pullTo(ev.rawY - startY)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (pulling) pullRelease()
+                    pulling = false
+                }
+            }
+            return true
+        }
     }.apply { setBackgroundColor(Color.BLACK) }
+
+    // ---------- Ελαστικό τράβηγμα προς τα κάτω ----------
+
+    private var pullTarget: View? = null
+    private var pullBaseY = 0f
+
+    /** Υπάρχει κάτι κάτω από το δάχτυλο που μπορεί ακόμα να κυλήσει προς τα πάνω; */
+    private fun scrollsUpAt(v: View, rx: Float, ry: Float): Boolean {
+        if (v.visibility != View.VISIBLE) return false
+        val loc = IntArray(2); v.getLocationOnScreen(loc)
+        if (rx < loc[0] || ry < loc[1] || rx > loc[0] + v.width * v.scaleX || ry > loc[1] + v.height * v.scaleY) return false
+        if (v.canScrollVertically(-1)) return true
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) if (scrollsUpAt(v.getChildAt(i), rx, ry)) return true
+        return false
+    }
+
+    private fun pullBegin() {
+        val t = openSection?.let { pages[it] } ?: homeLayer
+        t.animate().cancel()
+        pullTarget = t
+        pullBaseY = if (t === homeLayer) homeLayer.translationY else 0f
+        t.pivotX = t.width / 2f
+        t.pivotY = 0f
+    }
+
+    private fun pullTo(dy: Float) {
+        val t = pullTarget ?: return
+        val h = view.height.coerceAtLeast(1).toFloat()
+        val max = h * 0.4f
+        val d = max * (1f - exp(-dy.coerceAtLeast(0f) / max).toFloat())   // όσο τραβάς, τόσο «σκληραίνει»
+        t.translationY = pullBaseY + d * 0.45f
+        t.scaleY = 1f + d / h * 0.35f     // τεντώνει προς τα κάτω
+        t.scaleX = 1f - d / h * 0.06f     // και λεπταίνει λίγο
+    }
+
+    private fun pullRelease() {
+        val t = pullTarget ?: return
+        pullTarget = null
+        t.animate().translationY(pullBaseY).scaleX(1f).scaleY(1f)
+            .setDuration(750).setInterpolator(SpringInterpolator(5.5f, 15f)).setListener(null)
+            .withEndAction { t.pivotY = t.height / 2f }   // τα άλλα εφέ (άνοιγμα/κλείσιμο) θέλουν κέντρο
+            .start()
+    }
 
     private val homeLayer = FrameLayout(ctx)
     private val detailLayer = FrameLayout(ctx)
@@ -224,8 +308,13 @@ class Dashboard(
             orientation = LinearLayout.VERTICAL
             gravity = if (portrait) Gravity.CENTER else Gravity.CENTER_VERTICAL
         }
-        clock = tv("00:00", if (portrait) 96f else 108f, white, thin = true).apply { includeFontPadding = false }
-        date = tv("", 21f, amber, light = true).apply { setPadding(dp(6), 0, 0, 0) }
+        clock = tv("00:00", if (portrait) 96f else 108f, white, thin = true).apply {
+            includeFontPadding = false
+            if (portrait) gravity = Gravity.CENTER_HORIZONTAL   // κάθετη: ώρα και ημερομηνία στο κέντρο
+        }
+        date = tv("", 21f, amber, light = true).apply {
+            if (portrait) gravity = Gravity.CENTER_HORIZONTAL else setPadding(dp(6), 0, 0, 0)
+        }
         clockCol.addView(clock)
         clockCol.addView(date)
         clockBlock = clockCol
