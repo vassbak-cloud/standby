@@ -130,14 +130,7 @@ class Dashboard(
         buildHome()
         buildPages()
         view.addView(homeLayer, FrameLayout.LayoutParams(-1, -1))
-        if (portrait) {
-            // Κάθετη: η αρχική μένει όρθια, αλλά τα πλακίδια ανοίγουν οριζόντια (γυρισμένα στο πλάι)
-            val host = RotatedLayout(ctx, 90)
-            host.addView(detailLayer)
-            view.addView(host, FrameLayout.LayoutParams(-1, -1))
-        } else {
-            view.addView(detailLayer, FrameLayout.LayoutParams(-1, -1))
-        }
+        view.addView(detailLayer, FrameLayout.LayoutParams(-1, -1))
         // INVISIBLE (όχι GONE): μετριέται από την αρχή, ώστε το πρώτο άνοιγμα να έχει σωστό μέγεθος
         detailLayer.visibility = View.INVISIBLE
 
@@ -395,8 +388,7 @@ class Dashboard(
         detailLayer.visibility = View.VISIBLE
 
         val (tx, ty, sx, sy) = tileGeometry(tileView)
-        if (portrait) { page.pivotX = page.width / 2f; page.pivotY = page.height / 2f }
-        else { page.pivotX = 0f; page.pivotY = 0f }
+        page.pivotX = 0f; page.pivotY = 0f
         page.translationX = tx; page.translationY = ty
         page.scaleX = sx; page.scaleY = sy
         page.alpha = 0.4f
@@ -434,15 +426,10 @@ class Dashboard(
             .setInterpolator(SpringInterpolator(7f, 14f)).setListener(null).start()
     }
 
-    /** Πού μπαίνουν τα παράθυρα: πάνω στην ανοιχτή σελίδα (ίδια φορά με αυτή) ή στην αρχική. */
-    private fun overlayHost(): FrameLayout = if (openSection != null) detailLayer else view
-
     private data class Geo(val tx: Float, val ty: Float, val sx: Float, val sy: Float)
 
     /** Θέση και κλίμακα του πλακιδίου ως προς όλη την οθόνη. */
     private fun tileGeometry(t: View): Geo {
-        // Κάθετη: η σελίδα είναι γυρισμένη, οπότε απλό «άνοιγμα» από το κέντρο
-        if (portrait) return Geo(0f, 0f, 0.7f, 0.7f)
         val a = IntArray(2); val b = IntArray(2)
         t.getLocationInWindow(a); detailLayer.getLocationInWindow(b)
         val w = (if (detailLayer.width > 0) detailLayer.width else view.width).coerceAtLeast(1).toFloat()
@@ -537,7 +524,7 @@ class Dashboard(
         val btns = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         fun dismiss() {
             box.animate().scaleX(0.8f).scaleY(0.8f).alpha(0f).setDuration(180).start()
-            overlay.animate().alpha(0f).setDuration(200).withEndAction { (overlay.parent as? android.view.ViewGroup)?.removeView(overlay) }.start()
+            overlay.animate().alpha(0f).setDuration(200).withEndAction { view.removeView(overlay) }.start()
         }
         fun pill(label: String, color: Int, filled: Boolean, onTap: () -> Unit) = tv(label, 18f, white).apply {
             gravity = Gravity.CENTER
@@ -565,7 +552,7 @@ class Dashboard(
         box.addView(btns)
         overlay.setOnClickListener { dismiss() }
         overlay.addView(box, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
-        overlayHost().addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        view.addView(overlay, FrameLayout.LayoutParams(-1, -1))
 
         overlay.alpha = 0f
         overlay.animate().alpha(1f).setDuration(180).start()
@@ -1318,7 +1305,7 @@ class Dashboard(
 
         fun dismissPopup() {
             box.animate().scaleX(0.85f).scaleY(0.85f).alpha(0f).setDuration(180).start()
-            overlay.animate().alpha(0f).setDuration(200).withEndAction { (overlay.parent as? android.view.ViewGroup)?.removeView(overlay) }.start()
+            overlay.animate().alpha(0f).setDuration(200).withEndAction { view.removeView(overlay) }.start()
         }
         fun pill(label: String, color: Int, filled: Boolean, onTap: () -> Unit) = tv(label, 16f, white).apply {
             gravity = Gravity.CENTER
@@ -1344,13 +1331,11 @@ class Dashboard(
         box.addView(btns, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         overlay.setOnClickListener { dismissPopup() }
-        val host = overlayHost()
-        val tall = host.height > host.width
-        val w = if (tall) (host.width * 0.92f).toInt()
-                else (host.width * 0.72f).toInt().coerceAtLeast(dp(320)).coerceAtMost(host.width)
-        val h = (host.height * if (tall) 0.7f else 0.86f).toInt()
+        val w = if (portrait) (view.width * 0.92f).toInt()
+                else (view.width * 0.72f).toInt().coerceAtLeast(dp(320)).coerceAtMost(view.width)
+        val h = (view.height * if (portrait) 0.7f else 0.86f).toInt()
         overlay.addView(box, FrameLayout.LayoutParams(w, h, Gravity.CENTER))
-        overlayHost().addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        view.addView(overlay, FrameLayout.LayoutParams(-1, -1))
 
         overlay.alpha = 0f
         overlay.animate().alpha(1f).setDuration(180).start()
