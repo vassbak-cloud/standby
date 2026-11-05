@@ -11,8 +11,27 @@ android {
         applicationId 'gr.vassbak.standby'
         minSdk 26
         targetSdk 34
-        versionCode 13
-        versionName "2.2"
+        // Κάθε build στο GitHub παίρνει μεγαλύτερο αριθμό έκδοσης
+        versionCode (System.getenv('GITHUB_RUN_NUMBER') ?: '13').toInteger() + 100
+        versionName "2.3"
+    }
+
+    // Σταθερό κλειδί υπογραφής από τα GitHub secrets (STANDBY_KEYSTORE / STANDBY_KEYSTORE_PASSWORD):
+    // κάθε νέο APK εγκαθίσταται ως ενημέρωση πάνω στο προηγούμενο, χωρίς απεγκατάσταση.
+    // Αν δεν έχουν οριστεί, χρησιμοποιείται το προσωρινό debug κλειδί όπως πριν.
+    def ks = file('standby.keystore')
+    if (ks.exists()) {
+        signingConfigs {
+            standby {
+                storeFile ks
+                storePassword System.getenv('STANDBY_KEYSTORE_PASSWORD')
+                keyAlias 'standby'
+                keyPassword System.getenv('STANDBY_KEYSTORE_PASSWORD')
+            }
+        }
+        buildTypes {
+            debug { signingConfig signingConfigs.standby }
+        }
     }
 
     compileOptions {

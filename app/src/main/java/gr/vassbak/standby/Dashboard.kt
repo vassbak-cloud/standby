@@ -758,6 +758,27 @@ class Dashboard(
         // Πλήρης οθόνη: πλέγμα 4 + 3 ημερών
         calBody.removeAllViews()
         val byDay = list.groupBy { dayOffset(it) }
+        if (portrait) {
+            // Κάθετη: μία φαρδιά κάρτα ανά μέρα, με όλα τα γεγονότα της, σε λίστα με κύλιση
+            val days = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            for (d in 0..6) {
+                val (c, body) = card(if (d == 0) cCal else Color.parseColor("#8E6BB0"), dayName(d).uppercase(el))
+                val evs = byDay[d].orEmpty()
+                if (evs.isEmpty()) body.addView(tv("Τίποτα", 15f, dim))
+                for (e in evs.take(8)) {
+                    val t = if (e.allDay) "Ολοήμ." else timeFmt.format(Date(e.begin))
+                    body.addView(eventLine(t, e.title, e.color, 16f).apply { setPadding(0, dp(2), 0, dp(2)) })
+                }
+                if (evs.size > 8) body.addView(tv("+${evs.size - 8} ακόμα", 13f, grey))
+                days.addView(c, LinearLayout.LayoutParams(-1, -2).apply { if (d > 0) topMargin = dp(8) })
+            }
+            calBody.addView(android.widget.ScrollView(ctx).apply {
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(days)
+            }, LinearLayout.LayoutParams(-1, -1))
+            return
+        }
         val perRow = if (portrait) 2 else 4
         val maxEv = if (portrait) 2 else 3
         for (r in 0..6 / perRow) {
@@ -792,7 +813,7 @@ class Dashboard(
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
         }, LinearLayout.LayoutParams(dp(7), dp(7)).apply { marginEnd = dp(6) })
         line.addView(tv(whenTxt, size, grey).apply { setPadding(0, 0, dp(6), 0) })
-        line.addView(tv(title, size, soft).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+        line.addView(tv(title, size, soft).apply { maxLines = if (portrait && size >= 16f) 2 else 1; ellipsize = TextUtils.TruncateAt.END },
             LinearLayout.LayoutParams(0, -2, 1f))
         return line
     }
@@ -1161,13 +1182,16 @@ class Dashboard(
 
     private fun buildMusicPage() {
         val body = bodies.getValue(Section.MUSIC)
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val row = LinearLayout(ctx).apply {
+            orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = if (portrait) Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
+        }
         mArt = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(withAlpha(cMusic, 0x40)) }
             clipToOutline = true
         }
-        row.addView(mArt, LinearLayout.LayoutParams(dp(210), dp(210)).apply { marginEnd = dp(28) })
+        if (!portrait) row.addView(mArt, LinearLayout.LayoutParams(dp(210), dp(210)).apply { marginEnd = dp(28) })
 
         val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         mApp = tv("", 13f, cMusic)
@@ -1198,7 +1222,13 @@ class Dashboard(
         ctl.addView(circleBtn("⏭", 56, false) { musicCtl?.transportControls?.skipToNext() })
         col.addView(ctl, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(14); gravity = Gravity.CENTER_HORIZONTAL })
 
-        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        if (portrait) {
+            // Κάθετη: τίτλος και κουμπιά πάνω, εξώφυλλο από κάτω
+            row.addView(col, LinearLayout.LayoutParams(-1, -2))
+            row.addView(mArt, LinearLayout.LayoutParams(dp(240), dp(240)).apply { topMargin = dp(24) })
+        } else {
+            row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        }
         body.gravity = Gravity.CENTER_VERTICAL
         body.addView(row)
     }

@@ -19,7 +19,19 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      - name: Restore signing key
+        env:
+          STANDBY_KEYSTORE: ${{ secrets.STANDBY_KEYSTORE }}
+        run: |
+          if [ -n "$STANDBY_KEYSTORE" ]; then
+            echo "$STANDBY_KEYSTORE" | base64 -d > app/standby.keystore
+          else
+            echo "::warning::STANDBY_KEYSTORE secret not set — APK is signed with a throwaway key and will not install as an update"
+          fi
+
       - name: Build debug APK
+        env:
+          STANDBY_KEYSTORE_PASSWORD: ${{ secrets.STANDBY_KEYSTORE_PASSWORD }}
         run: gradle assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v4
