@@ -60,11 +60,16 @@ class Dashboard(
 ) {
     private enum class Section { NAV, WEATHER, BATTERY, COROS, MUSIC, CAL, NOTIF }
 
+    /** Κάθετη διάταξη (όρθιο κινητό) ή οριζόντια. */
+    private val portrait = Prefs.rotation(ctx) == 0
+
     val view: FrameLayout = object : FrameLayout(ctx) {
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) lastTouch = System.currentTimeMillis()
             return super.dispatchTouchEvent(ev)
         }
+        override fun onInterceptTouchEvent(ev: MotionEvent) = jellyIntercept(ev)
+        override fun onTouchEvent(ev: MotionEvent) = jellyTouch(ev)
     }.apply { setBackgroundColor(Color.BLACK) }
 
     private val homeLayer = FrameLayout(ctx)
@@ -206,6 +211,56 @@ class Dashboard(
     // ---------- Αρχική οθόνη με πλακίδια ----------
 
     private fun buildHome() {
+        if (portrait) buildHomePortrait() else buildHomeLandscape()
+
+        // Κουμπί Always On (φαίνεται μόνο εκτός φόρτισης)
+        aodPill = tv("", 13f, white).apply {
+            setPadding(dp(14), dp(7), dp(14), dp(7))
+            isClickable = true
+            visibility = View.GONE
+            setOnClickListener {
+                Prefs.get(ctx).edit().putBoolean(Prefs.KEY_AOD, !Prefs.alwaysOn(ctx)).apply()
+                styleAod()
+                scaleX = 0.85f; scaleY = 0.85f
+                animate().scaleX(1f).scaleY(1f).setDuration(500).setInterpolator(SpringInterpolator()).start()
+            }
+        }
+        styleAod()
+        homeLayer.addView(aodPill, if (portrait)
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(18) }
+        else
+            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply { leftMargin = dp(34); bottomMargin = dp(14) })
+    }
+
+    /** Κάθετη: ρολόι κεντραρισμένο πάνω, πλακίδια από κάτω σε φαρδιές σειρές. */
+    private fun buildHomePortrait() {
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(24), dp(16), dp(20))
+        }
+        val top = FrameLayout(ctx)
+        val clockCol = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+        clock = tv("00:00", 100f, white, thin = true).apply { includeFontPadding = false; gravity = Gravity.CENTER }
+        date = tv("", 21f, amber, light = true).apply { gravity = Gravity.CENTER }
+        clockCol.addView(clock, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        clockCol.addView(date, LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_HORIZONTAL })
+        clockBlock = clockCol
+        top.addView(clockCol, FrameLayout.LayoutParams(-1, -1))
+        val navTile = tile(Section.NAV, cNav, "ΠΛΟΗΓΗΣΗ")
+        navTile.visibility = View.GONE
+        top.addView(navTile, FrameLayout.LayoutParams(-1, -1))
+        root.addView(top, LinearLayout.LayoutParams(-1, 0, 1.25f))
+
+        root.addView(tileRow(Section.WEATHER to 1.4f, Section.BATTERY to 1f),
+            LinearLayout.LayoutParams(-1, 0, 0.8f).apply { topMargin = dp(10) })
+        root.addView(tileRow(Section.COROS to 1f, Section.MUSIC to 1.15f),
+            LinearLayout.LayoutParams(-1, 0, 0.8f).apply { topMargin = dp(8) })
+        root.addView(tileRow(Section.CAL to 1.4f, Section.NOTIF to 1f),
+            LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(8) })
+        homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
+    }
+
+    private fun buildHomeLandscape() {
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(28), dp(16), dp(28), dp(16))
@@ -235,23 +290,6 @@ class Dashboard(
         root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
 
         homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
-
-        // Κουμπί Always On (φαίνεται μόνο εκτός φόρτισης)
-        aodPill = tv("", 13f, white).apply {
-            setPadding(dp(14), dp(7), dp(14), dp(7))
-            isClickable = true
-            visibility = View.GONE
-            setOnClickListener {
-                Prefs.get(ctx).edit().putBoolean(Prefs.KEY_AOD, !Prefs.alwaysOn(ctx)).apply()
-                styleAod()
-                scaleX = 0.85f; scaleY = 0.85f
-                animate().scaleX(1f).scaleY(1f).setDuration(500).setInterpolator(SpringInterpolator()).start()
-            }
-        }
-        styleAod()
-        homeLayer.addView(aodPill, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
-            leftMargin = dp(34); bottomMargin = dp(14)
-        })
     }
 
     private fun tileRow(vararg items: Pair<Section, Float>): LinearLayout {
@@ -296,6 +334,14 @@ class Dashboard(
         }
         return outer
     }
+
+    /** Δύο κομμάτια δίπλα-δίπλα (οριζόντια) ή το ένα κάτω από το άλλο (κάθετη). */
+    private fun splitBox() = LinearLayout(ctx).apply {
+        orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+    }
+    private fun splitLp(weight: Float, gap: Boolean) =
+        if (portrait) LinearLayout.LayoutParams(-1, 0, weight).apply { if (gap) topMargin = dp(8) }
+        else LinearLayout.LayoutParams(0, -1, weight).apply { if (gap) marginStart = dp(8) }
 
     private fun styleAod() {
         val on = Prefs.alwaysOn(ctx)
@@ -393,15 +439,24 @@ class Dashboard(
         // Πλοήγηση σε όλη την οθόνη
         val nb = bodies.getValue(Section.NAV)
         nb.gravity = Gravity.CENTER_VERTICAL
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val row = LinearLayout(ctx).apply {
+            orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = if (portrait) Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
+        }
         navArrowBig = ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
-        row.addView(navArrowBig, LinearLayout.LayoutParams(dp(190), dp(190)).apply { marginEnd = dp(28) })
-        val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        row.addView(navArrowBig, LinearLayout.LayoutParams(dp(190), dp(190)).apply {
+            if (portrait) bottomMargin = dp(20) else marginEnd = dp(28)
+        })
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            if (portrait) gravity = Gravity.CENTER_HORIZONTAL
+        }
         navDistBig = tv("", 76f, white, light = true).apply { includeFontPadding = false; maxLines = 1 }
         navInstrBig = tv("", 32f, soft).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
         navEtaBig = tv("", 20f, cNav).apply { setPadding(0, dp(14), 0, 0); maxLines = 1 }
         col.addView(navDistBig); col.addView(navInstrBig); col.addView(navEtaBig)
-        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        if (portrait) { navInstrBig.gravity = Gravity.CENTER; navInstrBig.textSize = 28f }
+        row.addView(col, if (portrait) LinearLayout.LayoutParams(-1, -2) else LinearLayout.LayoutParams(0, -2, 1f))
         nb.addView(row)
 
         // Κουμπί τερματισμού: παρατεταμένο πάτημα → επιβεβαίωση
@@ -704,9 +759,11 @@ class Dashboard(
         // Πλήρης οθόνη: πλέγμα 4 + 3 ημερών
         calBody.removeAllViews()
         val byDay = list.groupBy { dayOffset(it) }
-        for (r in 0..1) {
+        val perRow = if (portrait) 2 else 4
+        val rowsN = (7 + perRow - 1) / perRow
+        for (r in 0 until rowsN) {
             val rowView = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            val range = if (r == 0) 0..3 else 4..6
+            val range = (r * perRow) until minOf(7, (r + 1) * perRow)
             for (d in range) {
                 val (c, body) = card(if (d == 0) cCal else Color.parseColor("#8E6BB0"), dayName(d).uppercase(el))
                 val evs = byDay[d].orEmpty()
@@ -720,8 +777,11 @@ class Dashboard(
                     if (d != range.first) marginStart = dp(8)
                 })
             }
-            if (r == 1) rowView.addView(View(ctx), LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(8) })
-            calBody.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
+            // κενά στο τέλος της τελευταίας σειράς για ίδιο πλάτος καρτών
+            repeat(perRow - range.count()) {
+                rowView.addView(View(ctx), LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(8) })
+            }
+            calBody.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r > 0) topMargin = dp(8) })
         }
     }
 
@@ -782,7 +842,7 @@ class Dashboard(
         if (main != null && main.minutes > 0) tileLine.addView(tv("  ${main.minutes}′", 15f, cCoros))
         setBody(tileBody, tileLine)
 
-        val cols = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val cols = splitBox()
 
         val (todayCard, tBody) = card(cCoros, "ΣΗΜΕΡΑ")
         tBody.gravity = Gravity.CENTER_VERTICAL
@@ -799,7 +859,7 @@ class Dashboard(
                 if (w.completed) append(" · ✓ Ολοκληρώθηκε")
             }, 17f, if (w.completed) cBattery else cCoros))
         }
-        cols.addView(todayCard, LinearLayout.LayoutParams(0, -1, 1.1f))
+        cols.addView(todayCard, splitLp(if (portrait) 0.8f else 1.1f, false))
 
         val (nextCard, nBody) = card(cCoros, "ΕΠΟΜΕΝΕΣ ΜΕΡΕΣ")
         if (next.isEmpty()) nBody.addView(tv("Τίποτα προγραμματισμένο", 15f, grey))
@@ -817,7 +877,7 @@ class Dashboard(
             }, LinearLayout.LayoutParams(0, -2, 1f))
             nBody.addView(line)
         }
-        cols.addView(nextCard, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(10) })
+        cols.addView(nextCard, splitLp(1f, true))
         body.addView(cols, LinearLayout.LayoutParams(-1, -1))
     }
 
@@ -851,14 +911,14 @@ class Dashboard(
 
         val body = bodies.getValue(Section.WEATHER)
         body.removeAllViews()
-        val top = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        val top = splitBox()
 
         val (nowCard, nowBody) = card(cWeather, "ΤΩΡΑ")
         nowBody.gravity = Gravity.CENTER_VERTICAL
         nowBody.addView(tv(now, 44f, white, light = true))
         nowBody.addView(tv(desc, 16f, soft))
         if (today != null) nowBody.addView(tv("$range · 💧${today.rain}%", 15f, cWeather))
-        top.addView(nowCard, LinearLayout.LayoutParams(0, -1, 1f))
+        top.addView(nowCard, splitLp(1f, false))
 
         val (daysCard, daysBody) = card(cWeather, "ΕΠΟΜΕΝΕΣ ΜΕΡΕΣ")
         val dayFmt = SimpleDateFormat("EEE", el)
@@ -867,8 +927,8 @@ class Dashboard(
                 "${Weather.text(d.code).first}\n${d.max}°/${d.min}°",
                 if (d.rain >= 20) "💧${d.rain}%" else " ")
         }), LinearLayout.LayoutParams(-1, -1))
-        top.addView(daysCard, LinearLayout.LayoutParams(0, -1, 2f).apply { marginStart = dp(8) })
-        body.addView(top, LinearLayout.LayoutParams(-1, 0, 1f))
+        top.addView(daysCard, splitLp(if (portrait) 1f else 2f, true))
+        body.addView(top, LinearLayout.LayoutParams(-1, 0, if (portrait) 2f else 1f))
 
         val (hCard, hBody) = card(cWeather, "ΕΠΟΜΕΝΕΣ ΩΡΕΣ")
         hBody.addView(columns(w.hours.filterIndexed { i, _ -> i % 2 == 0 }.take(8).map { h ->
@@ -982,10 +1042,12 @@ class Dashboard(
             tv(all.first().app, 12f, cNotif).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
 
         val items = all.take(6)
-        for (r in 0..1) {
+        val nCols = if (portrait) 2 else 3
+        val nRows = if (portrait) 3 else 2
+        for (r in 0 until nRows) {
             val rowView = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-            for (c in 0..2) {
-                val n = items.getOrNull(r * 3 + c)
+            for (c in 0 until nCols) {
+                val n = items.getOrNull(r * nCols + c)
                 val lpCard = LinearLayout.LayoutParams(0, -1, 1f).apply { if (c > 0) marginStart = dp(8) }
                 if (n == null) { rowView.addView(View(ctx), lpCard); continue }
                 val (cardView, cb) = card(cNotif, "${n.app} · ${timeFmt.format(Date(n.time))}".uppercase(el))
@@ -998,7 +1060,7 @@ class Dashboard(
                 swipeToDismiss(cardView, n.key) { showNotifDetail(n) }
                 rowView.addView(cardView, lpCard)
             }
-            body.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r == 1) topMargin = dp(8) })
+            body.addView(rowView, LinearLayout.LayoutParams(-1, 0, 1f).apply { if (r > 0) topMargin = dp(8) })
         }
     }
 
@@ -1067,13 +1129,17 @@ class Dashboard(
 
     private fun buildMusicPage() {
         val body = bodies.getValue(Section.MUSIC)
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val row = LinearLayout(ctx).apply {
+            orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+            gravity = if (portrait) Gravity.CENTER_HORIZONTAL else Gravity.CENTER_VERTICAL
+        }
         mArt = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(withAlpha(cMusic, 0x40)) }
             clipToOutline = true
         }
-        row.addView(mArt, LinearLayout.LayoutParams(dp(210), dp(210)).apply { marginEnd = dp(28) })
+        row.addView(mArt, if (portrait) LinearLayout.LayoutParams(dp(240), dp(240)).apply { bottomMargin = dp(24) }
+            else LinearLayout.LayoutParams(dp(210), dp(210)).apply { marginEnd = dp(28) })
 
         val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         mApp = tv("", 13f, cMusic)
@@ -1104,7 +1170,7 @@ class Dashboard(
         ctl.addView(circleBtn("⏭", 56, false) { musicCtl?.transportControls?.skipToNext() })
         col.addView(ctl, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(14); gravity = Gravity.CENTER_HORIZONTAL })
 
-        row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(col, if (portrait) LinearLayout.LayoutParams(-1, -2) else LinearLayout.LayoutParams(0, -2, 1f))
         body.gravity = Gravity.CENTER_VERTICAL
         body.addView(row)
     }
@@ -1281,6 +1347,98 @@ class Dashboard(
         overlay.animate().alpha(1f).setDuration(180).start()
         box.scaleX = 0.6f; box.scaleY = 0.6f
         box.animate().scaleX(1f).scaleY(1f).setDuration(600).setInterpolator(SpringInterpolator()).start()
+    }
+
+    // ---------- Εφέ «ζελέ»: τράβηγμα προς τα κάτω, επαναφορά με ελατήριο ----------
+
+    private val jSlop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+    private var jDownX = 0f
+    private var jDownY = 0f
+    private var jActive = false
+    private var jFresh = false
+    private var jTargets: List<Pair<View, Float>> = emptyList()   // (στοιχείο, κέντρο Y)
+
+    /** Μόνο όταν δεν υπάρχει ανοιχτό παράθυρο (επιβεβαίωση, ειδοποίηση) και δεν τρέχει κίνηση. */
+    private fun canJelly() = !animating && view.childCount <= 2
+
+    private fun jellyIntercept(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { jDownX = ev.x; jDownY = ev.y; jActive = false }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - jDownX
+                val dy = ev.y - jDownY
+                if (canJelly() && dy > jSlop * 1.5f && dy > kotlin.math.abs(dx) * 1.2f) {
+                    beginJelly(); return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun jellyTouch(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { jDownX = ev.x; jDownY = ev.y; jActive = false }
+            MotionEvent.ACTION_MOVE -> {
+                val dy = ev.y - jDownY
+                if (!jActive && canJelly() && dy > jSlop * 1.5f &&
+                    dy > kotlin.math.abs(ev.x - jDownX) * 1.2f) beginJelly()
+                if (jActive) applyJelly(dy, ev.y)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (jActive) releaseJelly()
+        }
+        return true
+    }
+
+    private fun beginJelly() {
+        jActive = true
+        jFresh = true
+        val views: List<View> = if (openSection == null) {
+            buildList {
+                if (clockBlock.visibility == View.VISIBLE) add(clockBlock)
+                tiles.values.filter { it.visibility == View.VISIBLE }.forEach { add(it) }
+                if (aodPill.visibility == View.VISIBLE) add(aodPill)
+            }
+        } else {
+            listOfNotNull((pages[openSection] as? FrameLayout)?.getChildAt(0))
+        }
+        jTargets = views.map { v ->
+            val r = android.graphics.Rect(0, 0, v.width, v.height)
+            try { view.offsetDescendantRectToMyCoords(v, r) } catch (_: Exception) {}
+            v to r.exactCenterY()
+        }
+    }
+
+    private fun applyJelly(dy: Float, touchY: Float) {
+        if (jFresh) { jTargets.forEach { it.first.animate().cancel() }; jFresh = false }
+        val h = view.height.toFloat().coerceAtLeast(1f)
+        val d = kotlin.math.max(0f, dy)
+        // «λάστιχο»: όσο τραβάς τόσο πιο δύσκολα πάει
+        val pull = h * 0.42f * (1f - exp(-d / (h * 0.55f)).toFloat())
+        for ((v, cy) in jTargets) {
+            // ό,τι είναι πιο κοντά στο δάχτυλο τραβιέται περισσότερο
+            val dist = kotlin.math.abs(cy - touchY) / h
+            val f = 1f - 0.55f * kotlin.math.min(1f, dist * 1.4f)
+            val p = pull * f
+            v.pivotX = v.width / 2f
+            v.pivotY = 0f
+            v.translationY = p * 0.55f
+            v.scaleY = 1f + p / h * 0.55f
+            v.scaleX = 1f - p / h * 0.10f
+        }
+    }
+
+    private fun releaseJelly() {
+        jActive = false
+        val h = view.height.toFloat().coerceAtLeast(1f)
+        for ((v, cy) in jTargets) {
+            val delay = (kotlin.math.abs(cy - jDownY) / h * 90f).toLong()
+            v.animate().translationY(0f).scaleX(1f).scaleY(1f)
+                .setStartDelay(delay).setDuration(820)
+                .setInterpolator(SpringInterpolator(5.2f, 15f))
+                .withEndAction { v.pivotY = v.height / 2f }
+                .start()
+        }
+        jTargets = emptyList()
     }
 
     // ---------- Βοηθητικά ----------

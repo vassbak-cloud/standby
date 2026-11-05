@@ -166,12 +166,13 @@ class MainActivity : Activity() {
         })
         col.addView(corosStatus)
 
-        col.addView(title("Φορά οθόνης", 18f))
+        col.addView(title("Προβολή", 18f))
         val prefs = Prefs.get(this)
         val group = RadioGroup(this)
         val options = listOf(
             90 to "Οριζόντια — φορτιστής δεξιά",
             270 to "Οριζόντια — φορτιστής αριστερά",
+            0 to "Κάθετη (όρθιο κινητό)"
         )
         for ((value, label) in options) {
             group.addView(RadioButton(this).apply {

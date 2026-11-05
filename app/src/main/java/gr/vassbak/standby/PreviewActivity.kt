@@ -25,7 +25,10 @@ class PreviewActivity : Activity() {
         })
         // Όταν το κινητό είναι όρθιο (π.χ. πάνω από την οθόνη κλειδώματος), περιστρέφουμε το περιεχόμενο
         // ώστε τα πλακίδια να φαίνονται πάντα οριζόντια
-        val wrapper = RotatedLayout(this, Prefs.rotation(this).let { if (it == 0) 90 else it })
+        val rot = Prefs.rotation(this)
+        requestedOrientation = if (rot == 0) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        val wrapper = RotatedLayout(this, rot)
         wrapper.addView(dashboard.view)
         setContentView(wrapper)
         hideBars()

@@ -14,7 +14,7 @@ class StandbyDream : DreamService() {
         isScreenBright = true
 
         val d = Dashboard(this, onExit = { finish() }, onNightChanged = { night -> isScreenBright = !night })
-        val wrapper = RotatedLayout(this, Prefs.rotation(this).let { if (it == 0) 90 else it })
+        val wrapper = RotatedLayout(this, Prefs.rotation(this))
         wrapper.addView(d.view)
         setContentView(wrapper)
         dashboard = d
