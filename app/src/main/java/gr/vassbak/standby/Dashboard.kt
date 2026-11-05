@@ -217,6 +217,20 @@ class Dashboard(
     private var lastTouch = System.currentTimeMillis()
     private val portrait = Prefs.portrait(ctx)
 
+    // Πλακίδια αρχικής: η σειρά τους αλλάζει με παρατεταμένο πάτημα και σύρσιμο, και αποθηκεύεται
+    private val homeSecs = listOf(Section.WEATHER, Section.BATTERY, Section.COROS, Section.MUSIC, Section.CAL, Section.NOTIF)
+    private val order: MutableList<Section> = loadOrder()
+    private val gridRows = mutableListOf<LinearLayout>()
+    private val rowWeights = floatArrayOf(1f, 0.95f, 1.25f)
+    private val colWeights = arrayOf(floatArrayOf(1.4f, 1f), floatArrayOf(1f, 1.15f), floatArrayOf(1.4f, 1f))
+
+    private fun loadOrder(): MutableList<Section> {
+        val saved = Prefs.get(ctx).getString(Prefs.KEY_TILE_ORDER, null)
+            ?.split(",")?.mapNotNull { n -> homeSecs.firstOrNull { it.name == n } }.orEmpty()
+        return if (saved.size == homeSecs.size && saved.toSet() == homeSecs.toSet()) saved.toMutableList()
+               else homeSecs.toMutableList()
+    }
+
     init {
         buildHome()
         buildPages()
@@ -339,11 +353,7 @@ class Dashboard(
                 orientation = LinearLayout.VERTICAL
                 setPadding(0, 0, 0, dp(56))   // χώρος για το κουμπάκι Always On
             }
-            list.addView(tileRow(Section.WEATHER to 1f, Section.BATTERY to 1f), LinearLayout.LayoutParams(-1, dp(118)))
-            list.addView(tileRow(Section.COROS to 1f, Section.MUSIC to 1f),
-                LinearLayout.LayoutParams(-1, dp(118)).apply { topMargin = dp(8) })
-            list.addView(tileRow(Section.CAL to 1f, Section.NOTIF to 1f),
-                LinearLayout.LayoutParams(-1, dp(118)).apply { topMargin = dp(8) })
+            list.addView(buildGrid(), LinearLayout.LayoutParams(-1, -2))
             val scroll = android.widget.ScrollView(ctx).apply {
                 isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
@@ -359,13 +369,7 @@ class Dashboard(
         }
 
         // Δεξιά: πλέγμα πλακιδίων
-        val right = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-        right.addView(tileRow(Section.WEATHER to 1.4f, Section.BATTERY to 1f), LinearLayout.LayoutParams(-1, 0, 1f))
-        right.addView(tileRow(Section.COROS to 1f, Section.MUSIC to 1.15f),
-            LinearLayout.LayoutParams(-1, 0, 0.95f).apply { topMargin = dp(8) })
-        right.addView(tileRow(Section.CAL to 1.4f, Section.NOTIF to 1f),
-            LinearLayout.LayoutParams(-1, 0, 1.25f).apply { topMargin = dp(8) })
-        root.addView(right, LinearLayout.LayoutParams(0, -1, 1f))
+        root.addView(buildGrid(), LinearLayout.LayoutParams(0, -1, 1f))
 
         homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
         addAodButton()
@@ -391,9 +395,10 @@ class Dashboard(
         })
     }
 
-    private fun tileRow(vararg items: Pair<Section, Float>): LinearLayout {
-        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-        items.forEachIndexed { i, (sec, w) ->
+    /** Πλέγμα 3 σειρών × 2 πλακιδίων, γεμισμένο με τη σειρά [order]. */
+    private fun buildGrid(): LinearLayout {
+        val grid = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        for (sec in homeSecs) {
             val (color, title) = when (sec) {
                 Section.WEATHER -> cWeather to "ΚΑΙΡΟΣ"
                 Section.BATTERY -> cBattery to "ΜΠΑΤΑΡΙΑ"
@@ -403,11 +408,123 @@ class Dashboard(
                 Section.MUSIC -> cMusic to "ΜΟΥΣΙΚΗ"
                 else -> grey to ""
             }
-            row.addView(tile(sec, color, title), LinearLayout.LayoutParams(0, -1, w).apply {
-                if (i > 0) marginStart = dp(8)
+            tile(sec, color, title)
+        }
+        for (r in 0..2) {
+            val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            gridRows.add(row)
+            val lp = if (portrait) LinearLayout.LayoutParams(-1, dp(118)) else LinearLayout.LayoutParams(-1, 0, rowWeights[r])
+            if (r > 0) lp.topMargin = dp(8)
+            grid.addView(row, lp)
+        }
+        layoutTiles()
+        return grid
+    }
+
+    private fun layoutTiles() {
+        gridRows.forEach { it.removeAllViews() }
+        order.forEachIndexed { i, sec ->
+            val r = i / 2; val c = i % 2
+            val w = if (portrait) 1f else colWeights[r][c]
+            gridRows[r].addView(tiles.getValue(sec), LinearLayout.LayoutParams(0, -1, w).apply {
+                if (c > 0) marginStart = dp(8)
             })
         }
-        return row
+    }
+
+    // ---------- Αναδιάταξη με παρατεταμένο πάτημα ----------
+
+    private var ghost: ImageView? = null
+    private var dragSec: Section? = null
+    private var dropSec: Section? = null
+    private var grabDx = 0f
+    private var grabDy = 0f
+
+    /**
+     * Σημείο από τις τοπικές συντεταγμένες του [v] σε συντεταγμένες της αρχικής. Λογαριάζει
+     * μετατοπίσεις/κλίμακες/περιστροφές, ώστε να δουλεύει και όταν η προφύλαξη οθόνης γυρίζει το περιεχόμενο.
+     */
+    private fun toHome(v: View, x: Float, y: Float): android.graphics.PointF {
+        val pts = floatArrayOf(x, y)
+        var cur: View = v
+        while (cur !== homeLayer) {
+            if (!cur.matrix.isIdentity) cur.matrix.mapPoints(pts)
+            val parent = cur.parent as? View ?: break
+            pts[0] += cur.left - parent.scrollX
+            pts[1] += cur.top - parent.scrollY
+            cur = parent
+        }
+        return android.graphics.PointF(pts[0], pts[1])
+    }
+
+    private fun homeRect(v: View): android.graphics.RectF {
+        val a = toHome(v, 0f, 0f); val b = toHome(v, v.width.toFloat(), v.height.toFloat())
+        return android.graphics.RectF(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y))
+    }
+
+    /** Σηκώνει το πλακίδιο: ένα «αντίγραφο» του ακολουθεί το δάχτυλο πάνω από όλα τα άλλα. */
+    private fun dragStart(sec: Section, v: View, x: Float, y: Float) {
+        v.parent?.requestDisallowInterceptTouchEvent(true)   // να μη κυλήσει/τεντώσει η οθόνη από κάτω
+        v.animate().cancel(); v.scaleX = 1f; v.scaleY = 1f
+        val bmp = android.graphics.Bitmap.createBitmap(v.width.coerceAtLeast(1), v.height.coerceAtLeast(1),
+            android.graphics.Bitmap.Config.ARGB_8888)
+        v.draw(android.graphics.Canvas(bmp))
+        val r = homeRect(v)
+        val p = toHome(v, x, y)
+        val g = ImageView(ctx).apply {
+            setImageBitmap(bmp)
+            this.x = r.left; this.y = r.top
+            elevation = dp(16).toFloat()
+        }
+        homeLayer.addView(g, FrameLayout.LayoutParams(v.width, v.height))
+        g.animate().scaleX(1.08f).scaleY(1.08f).alpha(0.92f).setDuration(260).setInterpolator(SpringInterpolator()).start()
+        grabDx = p.x - r.left; grabDy = p.y - r.top
+        ghost = g; dragSec = sec; dropSec = null
+        v.animate().alpha(0.25f).setDuration(150).start()
+        buzz(Haptic.HEAVY)
+    }
+
+    private fun dragMove(v: View, x: Float, y: Float) {
+        val g = ghost ?: return
+        val p = toHome(v, x, y)
+        g.x = p.x - grabDx
+        g.y = p.y - grabDy
+        // Ποιο πλακίδιο είναι κάτω από το δάχτυλο;
+        val over = order.firstOrNull { s ->
+            s != dragSec && tiles.getValue(s).visibility == View.VISIBLE && homeRect(tiles.getValue(s)).contains(p.x, p.y)
+        }
+        if (over != dropSec) {
+            dropSec?.let { tiles.getValue(it).animate().scaleX(1f).scaleY(1f).setDuration(200).start() }
+            over?.let { tiles.getValue(it).animate().scaleX(0.9f).scaleY(0.9f).setDuration(200).start() }
+            dropSec = over
+            if (over != null) buzz(Haptic.TICK)
+        }
+    }
+
+    private fun dragEnd() {
+        val g = ghost ?: return
+        val from = dragSec ?: return
+        val to = dropSec
+        val src = tiles.getValue(from)
+        ghost = null; dragSec = null; dropSec = null
+        if (to != null) {
+            tiles.getValue(to).animate().scaleX(1f).scaleY(1f).setDuration(200).start()
+            val a = order.indexOf(from); val b = order.indexOf(to)
+            order[a] = to; order[b] = from
+            Prefs.get(ctx).edit().putString(Prefs.KEY_TILE_ORDER, order.joinToString(",") { it.name }).apply()
+            layoutTiles()
+            buzz(Haptic.CLICK)
+        }
+        // Το αντίγραφο «προσγειώνεται» στη (νέα) θέση του πλακιδίου και εξαφανίζεται
+        src.post {
+            val r = homeRect(src)
+            g.animate().x(r.left).y(r.top).scaleX(1f).scaleY(1f).alpha(1f)
+                .setDuration(420).setInterpolator(SpringInterpolator(6f, 14f))
+                .withEndAction {
+                    src.alpha = 1f
+                    homeLayer.removeView(g)
+                }.start()
+        }
     }
 
     /** Πλακίδιο: χρωματιστό πλαίσιο που «βουλιάζει» στο πάτημα και ανοίγει σε όλη την οθόνη. */
@@ -416,18 +533,45 @@ class Dashboard(
         tiles[sec] = outer
         tileBodies[sec] = body
         outer.isClickable = true
+        // Παρατεταμένο πάτημα (μόνο στα πλακίδια της αρχικής) → σηκώνεται και σέρνεται σε άλλη θέση
+        val canDrag = sec in homeSecs
+        val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+        var downX = 0f; var downY = 0f
+        var lastX = 0f; var lastY = 0f   // τοπικές συντεταγμένες στο πλακίδιο
+        var dragging = false
+        val longPress = Runnable {
+            if (!animating && openSection == null && ghost == null) {
+                dragging = true
+                dragStart(sec, outer, lastX, lastY)
+            }
+        }
         outer.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    downX = e.rawX; downY = e.rawY; lastX = e.x; lastY = e.y; dragging = false
                     v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(110)
                         .setInterpolator(DecelerateInterpolator()).start()
+                    if (canDrag) handler.postDelayed(longPress, 450)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    lastX = e.x; lastY = e.y
+                    if (dragging) dragMove(v, e.x, e.y)
+                    else if (kotlin.math.abs(e.rawX - downX) > slop || kotlin.math.abs(e.rawY - downY) > slop)
+                        handler.removeCallbacks(longPress)
                 }
                 MotionEvent.ACTION_UP -> {
-                    springBack(v)
-                    val inside = e.x >= 0 && e.y >= 0 && e.x <= v.width && e.y <= v.height
-                    if (inside) { buzz(); open(sec) }
+                    handler.removeCallbacks(longPress)
+                    if (dragging) { dragging = false; dragEnd() }
+                    else {
+                        springBack(v)
+                        val inside = e.x >= 0 && e.y >= 0 && e.x <= v.width && e.y <= v.height
+                        if (inside) { buzz(); open(sec) }
+                    }
                 }
-                MotionEvent.ACTION_CANCEL -> springBack(v)
+                MotionEvent.ACTION_CANCEL -> {
+                    handler.removeCallbacks(longPress)
+                    if (dragging) { dragging = false; dragEnd() } else springBack(v)
+                }
             }
             true
         }
