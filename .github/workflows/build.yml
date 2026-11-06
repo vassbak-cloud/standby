@@ -34,7 +34,11 @@ jobs:
           STANDBY_KEYSTORE_PASSWORD: ${{ secrets.STANDBY_KEYSTORE_PASSWORD }}
         run: gradle assembleDebug --no-daemon
 
+      # Μοναδικό όνομα σε κάθε build, ώστε στο κινητό να μη βγαίνει «το αρχείο υπάρχει ήδη» στην αποσυμπίεση
+      - name: Name APK after build number
+        run: cp app/build/outputs/apk/debug/app-debug.apk StandBy-${{ github.run_number }}.apk
+
       - uses: actions/upload-artifact@v4
         with:
-          name: standby-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: standby-apk-${{ github.run_number }}
+          path: StandBy-${{ github.run_number }}.apk
