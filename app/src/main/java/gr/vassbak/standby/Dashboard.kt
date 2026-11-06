@@ -188,6 +188,10 @@ class Dashboard(
 
     // Αρχική
     private lateinit var clock: TextView
+    private lateinit var analog: AnalogClockView
+    private lateinit var clockFace: FrameLayout
+    private lateinit var styleDots: LinearLayout
+    private var clockStyle = 0
     private lateinit var date: TextView
     private lateinit var clockBlock: View
     private val tiles = mutableMapOf<Section, LinearLayout>()      // το πλαίσιο
@@ -336,9 +340,26 @@ class Dashboard(
         date = tv("", 21f, amber, light = true).apply {
             if (portrait) gravity = Gravity.CENTER_HORIZONTAL else setPadding(dp(6), 0, 0, 0)
         }
-        clockCol.addView(clock)
+        analog = AnalogClockView(ctx, amber)
+        val aSize = dp(if (portrait) 150 else 210)
+        clockFace = FrameLayout(ctx).apply {
+            addView(clock, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
+            addView(analog, FrameLayout.LayoutParams(aSize, aSize,
+                if (portrait) Gravity.CENTER_HORIZONTAL else Gravity.START).apply { if (!portrait) leftMargin = dp(4) })
+        }
+        clockCol.addView(clockFace, LinearLayout.LayoutParams(-1, -2))
         clockCol.addView(date)
+        // Τελείες που δείχνουν ποιο στυλ ρολογιού είναι επιλεγμένο (φαίνονται λίγο μετά από κάθε αλλαγή)
+        styleDots = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = if (portrait) Gravity.CENTER_HORIZONTAL else Gravity.START
+            setPadding(if (portrait) 0 else dp(8), dp(10), 0, 0)
+            alpha = 0f
+        }
+        clockCol.addView(styleDots, LinearLayout.LayoutParams(-1, -2))
         clockBlock = clockCol
+        applyClockStyle()
+        clockSwipe(clockCol)
         left.addView(clockCol, FrameLayout.LayoutParams(-1, -1))
         val navTile = tile(Section.NAV, cNav, "ΠΛΟΗΓΗΣΗ")
         navTile.visibility = View.GONE
@@ -373,6 +394,86 @@ class Dashboard(
 
         homeLayer.addView(root, FrameLayout.LayoutParams(-1, -1))
         addAodButton()
+    }
+
+    // ---------- Στυλ ρολογιού (σύρε αριστερά/δεξιά πάνω στο ρολόι) ----------
+
+    private data class ClockStyle(val font: String, val scale: Float, val stacked: Boolean = false,
+                                  val analog: Boolean = false, val spacing: Float = 0f)
+
+    private val clockStyles = listOf(
+        ClockStyle("sans-serif-thin", 1f),                         // λεπτό (το αρχικό)
+        ClockStyle("sans-serif-black", 0.9f),                      // έντονο
+        ClockStyle("serif", 0.95f),                                // κλασικό με πατούρες
+        ClockStyle("sans-serif-condensed-light", 1.12f),           // στενό & ψηλό
+        ClockStyle("monospace", 0.82f, spacing = -0.04f),          // ψηφιακό/γραφομηχανή
+        ClockStyle("sans-serif-medium", 0.72f, stacked = true),    // ώρες πάνω, λεπτά κάτω
+        ClockStyle("sans-serif", 1f, analog = true),               // αναλογικό
+    )
+
+    private fun clockText(now: Date): CharSequence {
+        val st = clockStyles[clockStyle]
+        if (!st.stacked) return timeFmt.format(now)
+        val hh = SimpleDateFormat("HH", el).format(now)
+        val mm = SimpleDateFormat("mm", el).format(now)
+        return android.text.SpannableString("$hh\n$mm").apply {
+            setSpan(android.text.style.ForegroundColorSpan(amber), 3, 5, 0)   // λεπτά σε πορτοκαλί
+        }
+    }
+
+    private fun applyClockStyle() {
+        clockStyle = Prefs.get(ctx).getInt(Prefs.KEY_CLOCK_STYLE, 0).coerceIn(0, clockStyles.size - 1)
+        val st = clockStyles[clockStyle]
+        val base = if (portrait) 96f else 108f
+        clock.visibility = if (st.analog) View.GONE else View.VISIBLE
+        analog.visibility = if (st.analog) View.VISIBLE else View.GONE
+        clock.typeface = Typeface.create(st.font, Typeface.NORMAL)
+        clock.textSize = base * st.scale
+        clock.letterSpacing = st.spacing
+        clock.setLineSpacing(0f, if (st.stacked) 0.82f else 1f)
+        clock.text = clockText(Date())
+        // Τελείες: όσα στυλ υπάρχουν, η τρέχουσα φωτεινή
+        styleDots.removeAllViews()
+        for (i in clockStyles.indices) styleDots.addView(View(ctx).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (i == clockStyle) white else Color.parseColor("#55FFFFFF"))
+            }
+        }, LinearLayout.LayoutParams(dp(6), dp(6)).apply { marginEnd = dp(6) })
+    }
+
+    /** Σύρσιμο αριστερά/δεξιά πάνω στο ρολόι: αλλάζει στυλ. Διπλό πάτημα: έξοδος (όπως πριν). */
+    private fun clockSwipe(area: View) {
+        val g = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onDoubleTap(e: MotionEvent): Boolean { onExit(); return true }
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                if (kotlin.math.abs(vx) < 500 || kotlin.math.abs(vx) < kotlin.math.abs(vy)) return false
+                changeClockStyle(if (vx < 0) 1 else -1)
+                return true
+            }
+        })
+        area.setOnTouchListener { _, e -> g.onTouchEvent(e) }
+    }
+
+    private fun changeClockStyle(dir: Int) {
+        val n = clockStyles.size
+        val next = (clockStyle + dir + n) % n
+        Prefs.get(ctx).edit().putInt(Prefs.KEY_CLOCK_STYLE, next).apply()
+        buzz(Haptic.TICK)
+        val w = clockFace.width.coerceAtLeast(dp(200)).toFloat()
+        clockFace.animate().cancel()
+        clockFace.animate().translationX(-dir * w * 0.5f).alpha(0f).setDuration(140)
+            .setInterpolator(DecelerateInterpolator()).withEndAction {
+                applyClockStyle()
+                clockFace.translationX = dir * w * 0.5f
+                clockFace.animate().translationX(0f).alpha(1f).setDuration(600)
+                    .setInterpolator(SpringInterpolator(6f, 13f)).start()
+            }.start()
+        styleDots.animate().cancel()
+        styleDots.animate().alpha(1f).setStartDelay(0).setDuration(150).withEndAction {
+            styleDots.animate().alpha(0f).setStartDelay(1500).setDuration(500).start()
+        }.start()
     }
 
     private fun addAodButton() {
@@ -865,7 +966,8 @@ class Dashboard(
     private fun updateClock() {
         val now = Date()
         val t = timeFmt.format(now)
-        clock.text = t
+        clock.text = clockText(now)
+        if (analog.visibility == View.VISIBLE) analog.invalidate()
         for (c in smallClocks) c.text = t
         if (openSection == Section.MUSIC) refreshMusicProgress()
 

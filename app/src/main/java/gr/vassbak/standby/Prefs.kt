@@ -35,6 +35,7 @@ object Prefs {
     const val KEY_WAKE_CHARGING = "wake_charging"
     fun wakeOnCharging(ctx: Context) = get(ctx).getBoolean(KEY_WAKE_CHARGING, false)
     const val KEY_TILE_ORDER = "tile_order"  // σειρά πλακιδίων στην αρχική, π.χ. "WEATHER,BATTERY,…"
+    const val KEY_CLOCK_STYLE = "clock_style" // 0 = λεπτό, … , τελευταίο = αναλογικό
     const val KEY_AOD = "always_on"
     fun alwaysOn(ctx: Context) = get(ctx).getBoolean(KEY_AOD, false)
     const val KEY_POCKET = "pocket"
