@@ -366,7 +366,7 @@ class Dashboard(
         left.addView(navTile, FrameLayout.LayoutParams(-1, -1).apply {
             if (portrait) bottomMargin = dp(10) else marginEnd = dp(10)
         })
-        root.addView(left, if (portrait) LinearLayout.LayoutParams(-1, dp(200)) else LinearLayout.LayoutParams(0, -1, 1.15f))
+        root.addView(left, if (portrait) LinearLayout.LayoutParams(-1, dp(230)) else LinearLayout.LayoutParams(0, -1, 1.15f))
 
         if (portrait) {
             // Κάθετη: δύο πλακίδια ανά σειρά, πιο φαρδιά απ' ό,τι ψηλά, με κύλιση αν δεν χωράνε
@@ -849,7 +849,12 @@ class Dashboard(
         val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         navDistBig = tv("", 76f, white, light = true).apply { includeFontPadding = false; maxLines = 1 }
         navInstrBig = tv("", 32f, soft).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END }
-        navEtaBig = tv("", 20f, cNav).apply { setPadding(0, dp(14), 0, 0); maxLines = 1 }
+        // Ώρα άφιξης / χρόνος / απόσταση: μεγάλα και έντονα, να διαβάζονται με μια ματιά στο τιμόνι
+        navEtaBig = tv("", if (portrait) 34f else 40f, cNav).apply {
+            setPadding(0, dp(16), 0, 0); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setLineSpacing(0f, 0.95f)
+        }
         col.addView(navDistBig); col.addView(navInstrBig); col.addView(navEtaBig)
         row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
         nb.addView(row)
@@ -1438,10 +1443,12 @@ class Dashboard(
         }, LinearLayout.LayoutParams(dp(96), dp(96)).apply { marginEnd = dp(12) })
         val col = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
         col.addView(tv(n.distance, 40f, white, light = true).apply { maxLines = 1; includeFontPadding = false })
-        col.addView(tv(n.instruction, 19f, soft).apply { maxLines = 3; ellipsize = TextUtils.TruncateAt.END })
+        col.addView(tv(n.instruction, 19f, soft).apply { maxLines = if (portrait) 2 else 3; ellipsize = TextUtils.TruncateAt.END })
         row.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
-        setBody(tb, row, tv(n.eta, 15f, cNav).apply {
-            setPadding(0, dp(8), 0, 0); maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+        setBody(tb, row, tv(n.eta, if (portrait) 24f else 28f, cNav).apply {
+            setPadding(0, dp(8), 0, 0); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setLineSpacing(0f, 0.95f)
         })
 
         // Πλήρης οθόνη
