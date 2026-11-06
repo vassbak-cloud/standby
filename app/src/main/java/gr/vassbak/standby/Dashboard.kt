@@ -401,7 +401,7 @@ class Dashboard(
     private data class ClockStyle(val font: String, val scale: Float, val stacked: Boolean = false,
                                   val analog: Boolean = false, val spacing: Float = 0f)
 
-    private val clockStyles = listOf(
+    private val clockStyles by lazy { listOf(
         ClockStyle("sans-serif-thin", 1f),                         // λεπτό (το αρχικό)
         ClockStyle("sans-serif-black", 0.9f),                      // έντονο
         ClockStyle("serif", 0.95f),                                // κλασικό με πατούρες
@@ -409,7 +409,7 @@ class Dashboard(
         ClockStyle("monospace", 0.82f, spacing = -0.04f),          // ψηφιακό/γραφομηχανή
         ClockStyle("sans-serif-medium", 0.72f, stacked = true),    // ώρες πάνω, λεπτά κάτω
         ClockStyle("sans-serif", 1f, analog = true),               // αναλογικό
-    )
+    ) }   // lazy: χρησιμοποιείται ήδη μέσα στο init, πριν φτάσει η σειρά αρχικοποίησής του
 
     private fun clockText(now: Date): CharSequence {
         val st = clockStyles[clockStyle]
