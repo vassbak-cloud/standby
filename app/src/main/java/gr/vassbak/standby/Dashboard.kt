@@ -401,15 +401,8 @@ class Dashboard(
     private data class ClockStyle(val font: String, val scale: Float, val stacked: Boolean = false,
                                   val analog: Boolean = false, val spacing: Float = 0f)
 
-    private val clockStyles by lazy { listOf(
-        ClockStyle("sans-serif-thin", 1f),                         // λεπτό (το αρχικό)
-        ClockStyle("sans-serif-black", 0.9f),                      // έντονο
-        ClockStyle("serif", 0.95f),                                // κλασικό με πατούρες
-        ClockStyle("sans-serif-condensed-light", 1.12f),           // στενό & ψηλό
-        ClockStyle("monospace", 0.82f, spacing = -0.04f),          // ψηφιακό/γραφομηχανή
-        ClockStyle("sans-serif-medium", 0.72f, stacked = true),    // ώρες πάνω, λεπτά κάτω
-        ClockStyle("sans-serif", 1f, analog = true),               // αναλογικό
-    ) }   // lazy: χρησιμοποιείται ήδη μέσα στο init, πριν φτάσει η σειρά αρχικοποίησής του
+    // Στο companion: αρχικοποιείται πριν από το init (όπου ήδη χρειάζεται), αλλιώς είναι ακόμα null
+    private val clockStyles get() = CLOCK_STYLES
 
     private fun clockText(now: Date): CharSequence {
         val st = clockStyles[clockStyle]
@@ -1912,4 +1905,16 @@ class Dashboard(
 
     private fun dp(v: Int) =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), ctx.resources.displayMetrics).toInt()
+
+    companion object {
+        private val CLOCK_STYLES = listOf(
+            ClockStyle("sans-serif-thin", 1f),                         // λεπτό (το αρχικό)
+            ClockStyle("sans-serif-black", 0.9f),                      // έντονο
+            ClockStyle("serif", 0.95f),                                // κλασικό με πατούρες
+            ClockStyle("sans-serif-condensed-light", 1.12f),           // στενό & ψηλό
+            ClockStyle("monospace", 0.82f, spacing = -0.04f),          // ψηφιακό/γραφομηχανή
+            ClockStyle("sans-serif-medium", 0.72f, stacked = true),    // ώρες πάνω, λεπτά κάτω
+            ClockStyle("sans-serif", 1f, analog = true),               // αναλογικό
+        )
+    }
 }
