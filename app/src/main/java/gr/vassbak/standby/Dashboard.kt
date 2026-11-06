@@ -757,8 +757,36 @@ class Dashboard(
             .setListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(a: Animator) { animating = false }
             }).start()
-        homeLayer.animate().scaleX(0.9f).scaleY(0.9f).alpha(0f).setDuration(300)
+        // Η αρχική μένει από πίσω: μικραίνει λίγο, θολώνει και σκοτεινιάζει
+        homeLayer.animate().scaleX(0.95f).scaleY(0.95f).alpha(1f).setDuration(350)
             .setInterpolator(DecelerateInterpolator()).setListener(null).start()
+        animateBackdrop(1f, 380)
+    }
+
+    private var backdrop = 0f
+    private var backdropAnim: android.animation.ValueAnimator? = null
+
+    /** 0 = καθαρή αρχική, 1 = θολή & σκοτεινή αρχική πίσω από το ανοιχτό παράθυρο. */
+    private fun setBackdrop(t: Float) {
+        backdrop = t
+        if (Build.VERSION.SDK_INT >= 31) {
+            val r = dp(26) * t
+            homeLayer.setRenderEffect(if (r < 0.5f) null
+                else android.graphics.RenderEffect.createBlurEffect(r, r, android.graphics.Shader.TileMode.CLAMP))
+        }
+        // Σε παλαιότερα Android (χωρίς θόλωμα) σκοτεινιάζει λίγο περισσότερο
+        val dim = if (Build.VERSION.SDK_INT >= 31) 120 else 175
+        detailLayer.setBackgroundColor(Color.argb((dim * t).toInt(), 0, 0, 0))
+    }
+
+    private fun animateBackdrop(to: Float, ms: Long) {
+        backdropAnim?.cancel()
+        backdropAnim = android.animation.ValueAnimator.ofFloat(backdrop, to).apply {
+            duration = ms
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { setBackdrop(it.animatedValue as Float) }
+            start()
+        }
     }
 
     private fun close() {
@@ -784,6 +812,7 @@ class Dashboard(
         homeLayer.scaleX = 0.95f; homeLayer.scaleY = 0.95f
         homeLayer.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(560)
             .setInterpolator(SpringInterpolator(7f, 14f)).setListener(null).start()
+        animateBackdrop(0f, 320)
     }
 
     private data class Geo(val tx: Float, val ty: Float, val sx: Float, val sy: Float)
@@ -922,8 +951,12 @@ class Dashboard(
 
     /** Πλήρης οθόνη για μία κατηγορία: χρωματιστό πλαίσιο σε όλη την οθόνη, πάτημα = επιστροφή. */
     private fun addPage(sec: Section, color: Int, title: String) {
+        // Το παράθυρο δεν πιάνει όλη την οθόνη: αφήνει περιθώριο ώστε να φαίνεται η (θολή) αρχική από πίσω.
+        // Πάτημα στο περιθώριο (ή μέσα στο παράθυρο) = κλείσιμο.
         val page = FrameLayout(ctx).apply {
-            setPadding(dp(18), dp(14), dp(18), dp(14))
+            if (portrait) setPadding(dp(18), dp(56), dp(18), dp(56))
+            else setPadding(dp(72), dp(26), dp(72), dp(26))
+            clipToPadding = false   // να φαίνεται η σκιά του παραθύρου
             visibility = View.INVISIBLE
             isClickable = true
             setOnClickListener { close() }
@@ -933,9 +966,15 @@ class Dashboard(
             setPadding(dp(22), dp(14), dp(22), dp(16))
             background = GradientDrawable().apply {
                 cornerRadius = dp(28).toFloat()
-                setColor(withAlpha(color, 0x22))
+                // Σκούρο, σχεδόν αδιαφανές «γυαλί» με απόχρωση του πλακιδίου, για να διαβάζεται πάνω από τη θολή αρχική
+                val k = 0.16f
+                setColor(Color.argb(0xEE,
+                    (Color.red(color) * k + 0x16 * (1 - k)).toInt(),
+                    (Color.green(color) * k + 0x16 * (1 - k)).toInt(),
+                    (Color.blue(color) * k + 0x18 * (1 - k)).toInt()))
                 setStroke(dp(2), withAlpha(color, 0x99))
             }
+            elevation = dp(12).toFloat()
         }
         val header = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(tv(title, 14f, color).apply {
