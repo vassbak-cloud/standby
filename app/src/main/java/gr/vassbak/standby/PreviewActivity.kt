@@ -3,6 +3,7 @@ package gr.vassbak.standby
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.os.Bundle
+import android.view.OrientationEventListener
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -14,18 +15,40 @@ import android.view.WindowManager
  */
 class PreviewActivity : Activity() {
 
+    companion object {
+        /** Η τελευταία φορά στο «αυτόματα», για να μη γυρίσει πίσω όταν ξαναστηθεί η οθόνη. */
+        private var lastFollow = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    }
+
     private lateinit var dashboard: Dashboard
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setShowWhenLocked(true)
         setTurnScreenOn(true)
-        // Αυτόματα: και τις 4 φορές (όρθιο, ανάποδα, πλάγια αριστερά/δεξιά), ακόμα κι αν είναι κλειδωμένη
-        // η περιστροφή. Σε κάθε γύρισμα η οθόνη ξαναστήνεται με την κατάλληλη διάταξη.
+        // Αυτόματα: όρθιο ή πλάγιο αριστερά/δεξιά (όχι ανάποδα), ακόμα κι αν είναι κλειδωμένη η περιστροφή.
+        // Σε κάθε γύρισμα η οθόνη ξαναστήνεται με την κατάλληλη διάταξη.
         requestedOrientation = when {
-            Prefs.followsPhone(this) -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-            Prefs.portrait(this) -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            Prefs.followsPhone(this) -> lastFollow
+            Prefs.portrait(this) -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT   // όρθιο μόνο, ποτέ ανάποδα
             else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        if (Prefs.followsPhone(this)) follow = object : OrientationEventListener(this) {
+            override fun onOrientationChanged(deg: Int) {
+                if (deg == ORIENTATION_UNKNOWN) return
+                // Περιθώριο ±30° γύρω από κάθε θέση, για να μη «χορεύει» στις ενδιάμεσες γωνίες.
+                // Το ανάποδο όρθιο (≈180°) αγνοείται: η οθόνη μένει όπως ήταν.
+                val target = when {
+                    deg >= 330 || deg <= 30 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    deg in 60..120 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+                    deg in 240..300 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    else -> return
+                }
+                if (target != requestedOrientation) {
+                    lastFollow = target
+                    requestedOrientation = target
+                }
+            }
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         dashboard = Dashboard(this, onExit = { finish() }, onNightChanged = { night ->
@@ -48,12 +71,16 @@ class PreviewActivity : Activity() {
         }
     }
 
+    private var follow: OrientationEventListener? = null
+
     override fun onResume() {
         super.onResume()
+        follow?.let { if (it.canDetectOrientation()) it.enable() }
         dashboard.start()
     }
 
     override fun onPause() {
+        follow?.disable()
         dashboard.stop()
         super.onPause()
     }
