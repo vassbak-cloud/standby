@@ -28,14 +28,10 @@ class PreviewActivity : Activity() {
         setTurnScreenOn(true)
         // Αυτόματα: όρθιο ή πλάγιο αριστερά/δεξιά (όχι ανάποδα), ακόμα κι αν είναι κλειδωμένη η περιστροφή.
         // Σε κάθε γύρισμα η οθόνη ξαναστήνεται με την κατάλληλη διάταξη.
-        requestedOrientation = when {
-            Prefs.followsPhone(this) -> lastFollow
-            Prefs.portrait(this) -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT   // όρθιο μόνο, ποτέ ανάποδα
-            else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        }
+        applyOrientation()
         if (Prefs.followsPhone(this)) follow = object : OrientationEventListener(this) {
             override fun onOrientationChanged(deg: Int) {
-                if (deg == ORIENTATION_UNKNOWN) return
+                if (deg == ORIENTATION_UNKNOWN || Prefs.orientLocked(this@PreviewActivity)) return
                 // Περιθώριο ±30° γύρω από κάθε θέση, για να μη «χορεύει» στις ενδιάμεσες γωνίες.
                 // Το ανάποδο όρθιο (≈180°) αγνοείται: η οθόνη μένει όπως ήταν.
                 val target = when {
@@ -53,7 +49,7 @@ class PreviewActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         dashboard = Dashboard(this, onExit = { finish() }, onNightChanged = { night ->
             window.attributes = window.attributes.apply { screenBrightness = if (night) 0.05f else -1f }
-        })
+        }, onOrientLock = { applyOrientation() })
         setContentView(dashboard.view)
         hideBars()
     }
@@ -72,6 +68,16 @@ class PreviewActivity : Activity() {
     }
 
     private var follow: OrientationEventListener? = null
+
+    /** Κλειδωμένη (από το κουμπάκι): μένει όπως είναι τώρα. Αλλιώς ανάλογα με τη «Φορά οθόνης». */
+    private fun applyOrientation() {
+        requestedOrientation = when {
+            Prefs.orientLocked(this) -> ActivityInfo.SCREEN_ORIENTATION_LOCKED
+            Prefs.followsPhone(this) -> lastFollow
+            Prefs.portrait(this) -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT   // όρθιο μόνο, ποτέ ανάποδα
+            else -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+    }
 
     override fun onResume() {
         super.onResume()

@@ -60,7 +60,9 @@ class SpringInterpolator(private val damping: Float = 6.5f, private val freq: Fl
 class Dashboard(
     private val ctx: Context,
     private val onExit: () -> Unit = {},
-    private val onNightChanged: (Boolean) -> Unit = {}
+    private val onNightChanged: (Boolean) -> Unit = {},
+    /** Αν το παράθυρο μπορεί να κλειδώσει την περιστροφή (όχι η προφύλαξη οθόνης), εδώ το κάνει. */
+    private val onOrientLock: ((Boolean) -> Unit)? = null
 ) {
     private enum class Section { NAV, WEATHER, BATTERY, COROS, MUSIC, CAL, NOTIF }
 
@@ -215,7 +217,8 @@ class Dashboard(
 
     private var weatherReady = false
     private var charging = true
-    private lateinit var aodPill: View
+    private lateinit var aodPill: AodButtonView
+    private lateinit var aodLabel: TextView
     private var lastMinute = -1
     private var night: Boolean? = null
     private var lastTouch = System.currentTimeMillis()
@@ -471,21 +474,45 @@ class Dashboard(
 
     private fun addAodButton() {
 
-        // Κουμπάκι Always On (φαίνεται μόνο εκτός φόρτισης): πράσινο = δεν κλείνει, γκρι = κλείνει σε 1′
-        aodPill = View(ctx).apply {
+        // Κουμπάκι κάτω αριστερά, κάθε ταπ πάει στο επόμενο:
+        //   πράσινο (πάντα ανοιχτή) → γκρι (κλείνει σε 1′ χωρίς φόρτιση) → αχνό λουκέτο (κλειδωμένη περιστροφή) → πράσινο
+        aodPill = AodButtonView(ctx, cNav).apply {
             isClickable = true
             visibility = View.GONE
+            setPadding(dp(4), dp(4), dp(4), dp(4))
             setOnClickListener {
                 buzz()
-                Prefs.get(ctx).edit().putBoolean(Prefs.KEY_AOD, !Prefs.alwaysOn(ctx)).apply()
+                val lockable = onOrientLock != null
+                val next = when (mode) {
+                    AodButtonView.MODE_ON -> AodButtonView.MODE_OFF
+                    AodButtonView.MODE_OFF -> if (lockable) AodButtonView.MODE_LOCK else AodButtonView.MODE_ON
+                    else -> AodButtonView.MODE_ON
+                }
+                val wasLocked = Prefs.orientLocked(ctx)
+                val lock = next == AodButtonView.MODE_LOCK
+                Prefs.get(ctx).edit()
+                    .putBoolean(Prefs.KEY_AOD, next != AodButtonView.MODE_OFF)
+                    .putBoolean(Prefs.KEY_ORIENT_LOCK, lock)
+                    .apply()
                 styleAod()
-                scaleX = 0.85f; scaleY = 0.85f
+                showAodLabel(when (next) {
+                    AodButtonView.MODE_ON -> "Οθόνη πάντα ανοιχτή"
+                    AodButtonView.MODE_OFF -> "Κλείνει σε 1′ χωρίς φόρτιση"
+                    else -> "Κλείδωμα περιστροφής"
+                })
+                if (lock != wasLocked) onOrientLock?.invoke(lock)
+                scaleX = 0.8f; scaleY = 0.8f
                 animate().scaleX(1f).scaleY(1f).setDuration(500).setInterpolator(SpringInterpolator()).start()
             }
         }
         styleAod()
-        homeLayer.addView(aodPill, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.BOTTOM or Gravity.START).apply {
-            leftMargin = dp(34); bottomMargin = dp(14)
+        homeLayer.addView(aodPill, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = dp(31); bottomMargin = dp(11)
+        })
+        // Σύντομη ετικέτα δίπλα στο κουμπάκι που λέει τι επιλέχθηκε
+        aodLabel = tv("", 13f, soft).apply { alpha = 0f }
+        homeLayer.addView(aodLabel, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = dp(68); bottomMargin = dp(16)
         })
     }
 
@@ -673,13 +700,24 @@ class Dashboard(
     }
 
     private fun styleAod() {
-        val on = Prefs.alwaysOn(ctx)
-        aodPill.contentDescription = if (on) "Always On: ενεργό" else "Always On: ανενεργό"
-        aodPill.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(if (on) cNav else Color.parseColor("#5A5A5A"))
-            setStroke(dp(2), if (on) Color.parseColor("#6634C759") else Color.parseColor("#33FFFFFF"))
+        aodPill.mode = when {
+            onOrientLock != null && Prefs.orientLocked(ctx) -> AodButtonView.MODE_LOCK
+            Prefs.alwaysOn(ctx) -> AodButtonView.MODE_ON
+            else -> AodButtonView.MODE_OFF
         }
+        aodPill.contentDescription = when (aodPill.mode) {
+            AodButtonView.MODE_ON -> "Οθόνη πάντα ανοιχτή"
+            AodButtonView.MODE_OFF -> "Η οθόνη κλείνει μόνη της"
+            else -> "Κλειδωμένη περιστροφή"
+        }
+    }
+
+    private fun showAodLabel(text: String) {
+        aodLabel.text = text
+        aodLabel.animate().cancel()
+        aodLabel.animate().alpha(1f).setStartDelay(0).setDuration(150).withEndAction {
+            aodLabel.animate().alpha(0f).setStartDelay(1400).setDuration(500).start()
+        }.start()
     }
 
     /** Μικρή δόνηση στο πάτημα κουμπιού. */
@@ -1070,7 +1108,8 @@ class Dashboard(
         val temp = i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) / 10f
         val pct = if (level >= 0) level * 100 / scale else 0
         charging = plugged != 0
-        aodPill.visibility = if (charging) View.GONE else View.VISIBLE
+        // Στη φόρτιση φαίνεται μόνο αν μπορεί να κλειδώσει την περιστροφή (στην προφύλαξη οθόνης όχι)
+        aodPill.visibility = if (charging && onOrientLock == null) View.GONE else View.VISIBLE
         val state = when (status) {
             BatteryManager.BATTERY_STATUS_FULL -> "Πλήρης"
             BatteryManager.BATTERY_STATUS_CHARGING -> "Φορτίζει"
